@@ -1,0 +1,88 @@
+{
+  "name": "ai-chatbot-container",
+  "version": "1.0.0",
+  "description": "AI Chatbot Container - Isolated environment for individual AI instances",
+  "main": "botLogic.js",
+  "scripts": {
+    "start": "node botLogic.js",
+    "dev": "nodemon botLogic.js",
+    "test": "echo \"No tests specified\" && exit 0",
+    "health": "curl http://localhost:3001/health",
+    "logs": "tail -f /tmp/ai-container.log"
+  },
+  "keywords": [
+    "ai",
+    "chatbot",
+    "container",
+    "isolated",
+    "docker"
+  ],
+  "author": "AI Platform Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/ai-platform.git",
+    "directory": "containers/mainCodebase"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/ai-platform/issues"
+  },
+  "homepage": "https://github.com/your-org/ai-platform#readme",
+  "container": {
+    "type": "ai-chatbot",
+    "version": "1.0.0",
+    "capabilities": [
+      "basic_chat",
+      "code_generation",
+      "creative_writing",
+      "data_analysis",
+      "translation",
+      "summarization",
+      "explanation"
+    ],
+    "personalities": [
+      "professional",
+      "casual",
+      "technical",
+      "creative"
+    ],
+    "requirements": {
+      "memory": "512MB",
+      "cpu": "0.5 cores",
+      "storage": "100MB",
+      "network": "HTTP/HTTPS"
+    }
+  },
+  "environment": {
+    "NODE_ENV": "production",
+    "PORT": "3001",
+    "CONTAINER_ID": "required",
+    "SESSION_ID": "required",
+    "AI_NAME": "required",
+    "AI_DESCRIPTION": "required",
+    "AI_PERSONALITY": "optional",
+    "OPENAI_API_KEY": "optional",
+    "ANTHROPIC_API_KEY": "optional",
+    "GOOGLE_AI_API_KEY": "optional",
+    "AZURE_AI_API_KEY": "optional",
+    "AWS_ACCESS_KEY_ID": "optional",
+    "AWS_SECRET_ACCESS_KEY": "optional",
+    "GCP_PROJECT_ID": "optional",
+    "AZURE_SUBSCRIPTION_ID": "optional"
+  }
+}
+
+
+
