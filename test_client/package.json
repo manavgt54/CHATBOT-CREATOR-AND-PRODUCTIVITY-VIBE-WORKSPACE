@@ -1,0 +1,16 @@
+{
+  "name": "mini-chatbot-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone mini chatbot client to test public invoke API with AI API key",
+  "main": "miniChat.js",
+  "scripts": {
+    "start": "node miniChat.js",
+    "seed": "node miniChat.js --seed"
+  },
+  "dependencies": {
+    "axios": "^1.7.2"
+  }
+}
+
+

@@ -4,6 +4,8 @@ import styled from 'styled-components';
 import LoginForm from './components/LoginForm';
 import Dashboard from './components/Dashboard';
 import CreateAIForm from './components/CreateAIForm';
+import MusicSpaces from './components/MusicSpaces';
+import { MusicProvider } from './contexts/MusicContext';
 import { sessionManager } from './utils/sessionManager';
 
 const AppContainer = styled.div`
@@ -57,37 +59,47 @@ function App() {
   }
 
   return (
-    <AppContainer>
-      <Router>
-        <Routes>
-          <Route 
-            path="/login" 
-            element={
-              isAuthenticated ? 
-                <Navigate to="/dashboard" replace /> : 
-                <LoginForm onLogin={handleLogin} />
-            } 
-          />
-          <Route 
-            path="/dashboard" 
-            element={
-              isAuthenticated ? 
-                <Dashboard sessionId={sessionId} onLogout={handleLogout} /> : 
-                <Navigate to="/login" replace />
-            } 
-          />
-          <Route 
-            path="/create-ai" 
-            element={
-              isAuthenticated ? 
-                <CreateAIForm sessionId={sessionId} /> : 
-                <Navigate to="/login" replace />
-            } 
-          />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </Router>
-    </AppContainer>
+    <MusicProvider>
+      <AppContainer>
+        <Router>
+          <Routes>
+            <Route 
+              path="/login" 
+              element={
+                isAuthenticated ? 
+                  <Navigate to="/dashboard" replace /> : 
+                  <LoginForm onLogin={handleLogin} />
+              } 
+            />
+            <Route 
+              path="/dashboard" 
+              element={
+                isAuthenticated ? 
+                  <Dashboard sessionId={sessionId} onLogout={handleLogout} /> : 
+                  <Navigate to="/login" replace />
+              } 
+            />
+            <Route 
+              path="/create-ai" 
+              element={
+                isAuthenticated ? 
+                  <CreateAIForm sessionId={sessionId} /> : 
+                  <Navigate to="/login" replace />
+              } 
+            />
+            <Route 
+              path="/music-spaces" 
+              element={
+                isAuthenticated ? 
+                  <MusicSpaces /> : 
+                  <Navigate to="/login" replace />
+              } 
+            />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </Router>
+      </AppContainer>
+    </MusicProvider>
   );
 }
 

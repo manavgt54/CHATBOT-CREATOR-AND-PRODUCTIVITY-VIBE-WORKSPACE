@@ -7,6 +7,7 @@ const http = require('http');
 // Import route handlers
 const authRoutes = require('./routes/authRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const publicAIRoutes = require('./routes/publicAIRoutes');
 
 // Import services
 const { sessionManager } = require('./services/sessionManager');
@@ -47,6 +48,7 @@ if (process.env.NODE_ENV === 'production') {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', aiRoutes);
+app.use('/public', publicAIRoutes);
 
 // WebSocket connection handling for real-time AI interactions
 wss.on('connection', (ws, req) => {

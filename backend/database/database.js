@@ -103,6 +103,20 @@ class Database {
         response_time INTEGER,
         FOREIGN KEY (container_id) REFERENCES ai_instances (container_id),
         FOREIGN KEY (session_id) REFERENCES sessions (id)
+      )`,
+
+      // AI API Keys table
+      `CREATE TABLE IF NOT EXISTS ai_api_keys (
+        id TEXT PRIMARY KEY,
+        container_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        api_key TEXT UNIQUE NOT NULL,
+        label TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_used_at DATETIME,
+        is_active BOOLEAN DEFAULT 1,
+        FOREIGN KEY (container_id) REFERENCES ai_instances (container_id),
+        FOREIGN KEY (user_id) REFERENCES users (id)
       )`
     ];
 
@@ -118,7 +132,10 @@ class Database {
       'CREATE INDEX IF NOT EXISTS idx_ai_instances_status ON ai_instances(status)',
       'CREATE INDEX IF NOT EXISTS idx_container_logs_container_id ON container_logs(container_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_interactions_container_id ON ai_interactions(container_id)',
-      'CREATE INDEX IF NOT EXISTS idx_ai_interactions_timestamp ON ai_interactions(timestamp)'
+      'CREATE INDEX IF NOT EXISTS idx_ai_interactions_timestamp ON ai_interactions(timestamp)',
+      'CREATE INDEX IF NOT EXISTS idx_api_keys_container_id ON ai_api_keys(container_id)',
+      'CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON ai_api_keys(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_api_keys_active ON ai_api_keys(is_active)'
     ];
 
     for (const index of indexes) {

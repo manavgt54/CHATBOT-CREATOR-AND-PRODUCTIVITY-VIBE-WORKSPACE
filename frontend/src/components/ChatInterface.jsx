@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { apiService } from '../services/api';
+import MiniMusicPlayer from './MiniMusicPlayer';
 
 const ChatContainer = styled.div`
   position: fixed;
@@ -51,6 +52,26 @@ const CloseButton = styled.button`
   border-radius: 10px;
   cursor: pointer;
   font-size: 1.2rem;
+  transition: background 0.3s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+`;
+
+const HeaderActions = styled.div`
+  display: flex;
+  gap: 10px;
+`;
+
+const SmallButton = styled.button`
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
   transition: background 0.3s ease;
 
   &:hover {
@@ -171,6 +192,8 @@ function ChatInterface({ ai, onClose, sessionId }) {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const [apiKey, setApiKey] = useState('');
+  const [isGeneratingKey, setIsGeneratingKey] = useState(false);
 
   useEffect(() => {
     // Add welcome message
@@ -248,15 +271,49 @@ function ChatInterface({ ai, onClose, sessionId }) {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleGenerateApiKey = async () => {
+    if (isGeneratingKey) return;
+    setIsGeneratingKey(true);
+    try {
+      const resp = await apiService.generateAIKey(sessionId, ai.containerId, 'chat');
+      if (resp.success && resp.apiKey) {
+        setApiKey(resp.apiKey);
+      } else {
+        setApiKey('');
+        alert(resp.message || 'Failed to generate API key');
+      }
+    } catch (e) {
+      alert('Failed to generate API key');
+    } finally {
+      setIsGeneratingKey(false);
+    }
+  };
+
   return (
     <ChatContainer onClick={onClose}>
       <ChatWindow onClick={(e) => e.stopPropagation()}>
         <ChatHeader>
           <ChatTitle>{ai.name}</ChatTitle>
-          <CloseButton onClick={onClose}>×</CloseButton>
+          <HeaderActions>
+            <SmallButton onClick={handleGenerateApiKey} disabled={isGeneratingKey}>
+              {isGeneratingKey ? 'Generating…' : (apiKey ? 'Regenerate API Key' : 'Generate API Key')}
+            </SmallButton>
+            <CloseButton onClick={onClose}>×</CloseButton>
+          </HeaderActions>
         </ChatHeader>
         
         <MessagesContainer>
+          {apiKey && (
+            <Message isUser={false}>
+              <div>
+                <MessageBubble isUser={false}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Public API Key</div>
+                  <div style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{apiKey}</div>
+                  <div style={{ marginTop: 10, fontSize: '0.9rem' }}>Use with header <code>X-AI-API-Key</code> at <code>POST /public/invoke</code></div>
+                </MessageBubble>
+              </div>
+            </Message>
+          )}
           {messages.map((message) => (
             <Message key={message.id} isUser={message.isUser}>
               <div>
@@ -305,6 +362,9 @@ function ChatInterface({ ai, onClose, sessionId }) {
           </SendButton>
         </InputContainer>
       </ChatWindow>
+      
+      {/* Mini Music Player */}
+      <MiniMusicPlayer />
     </ChatContainer>
   );
 }

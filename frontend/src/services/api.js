@@ -220,6 +220,51 @@ export const apiService = {
       };
     }
   },
+
+  /**
+   * Generate an API key for a specific AI
+   */
+  async generateAIKey(sessionId, containerId, label = 'default') {
+    try {
+      const response = await apiClient.post('/generate_api_key', {
+        containerId,
+        label,
+      }, {
+        headers: { 'X-Session-ID': sessionId }
+      });
+      return response;
+    } catch (error) {
+      return { success: false, message: error.message || 'Failed to generate API key' };
+    }
+  },
+
+  /**
+   * List API keys for an AI
+   */
+  async listAIKeys(sessionId, containerId) {
+    try {
+      const response = await apiClient.get(`/list_api_keys/${containerId}`, {
+        headers: { 'X-Session-ID': sessionId }
+      });
+      return response;
+    } catch (error) {
+      return { success: false, message: error.message || 'Failed to list API keys', keys: [] };
+    }
+  },
+
+  /**
+   * Revoke an API key by id
+   */
+  async revokeAIKey(sessionId, keyId) {
+    try {
+      const response = await apiClient.post('/revoke_api_key', { keyId }, {
+        headers: { 'X-Session-ID': sessionId }
+      });
+      return response;
+    } catch (error) {
+      return { success: false, message: error.message || 'Failed to revoke API key' };
+    }
+  },
 };
 
 export default apiService;

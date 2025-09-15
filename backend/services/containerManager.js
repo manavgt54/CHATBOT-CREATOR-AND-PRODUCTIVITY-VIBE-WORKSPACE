@@ -22,6 +22,7 @@ class ContainerManager {
     this.usedPorts = new Set(); // Track used ports
     this.basePort = 3001; // Starting port for AI containers
     this.instructionGenerator = new AIInstructionGenerator(); // AI instruction generator
+    this.containerBots = new Map(); // Demo mode: cache AIChatbot instances per container
     
     // Placeholder credentials - replace with actual cloud credentials
     this.cloudCredentials = {
@@ -179,6 +180,15 @@ class ContainerManager {
       await this.copyDirectory(mainCodebasePath, containerPath);
 
       console.log(`✅ Main codebase cloned to container ${containerId}`);
+
+      // Initialize per-container RAG database folder
+      try {
+        const ragDir = path.join(containerPath, 'rag_db');
+        await fs.mkdir(ragDir, { recursive: true });
+        await fs.writeFile(path.join(ragDir, 'index.json'), JSON.stringify({ vectors: [] }, null, 2), 'utf-8');
+      } catch (e) {
+        console.warn(`⚠️ Failed to initialize RAG DB for ${containerId}:`, e.message);
+      }
 
     } catch (error) {
       console.error(`❌ Failed to clone main codebase for ${containerId}:`, error);
@@ -375,21 +385,20 @@ class ContainerManager {
         throw new Error(`Container directory not found: ${containerId}`);
       }
 
-      // Load AI configuration
-      const configPath = path.join(containerPath, 'ai-config.js');
-      const aiConfig = require(configPath);
+      // Reuse or create singleton chatbot instance per container
+      let bot = this.containerBots.get(containerId);
+      if (!bot) {
+        // Load bot logic
+        const botLogicPath = path.join(containerPath, 'botLogic.js');
+        const { AIChatbot } = require(botLogicPath);
+        process.env.CONTAINER_ID = containerId;
+        process.env.SESSION_ID = sessionId;
+        bot = new AIChatbot();
+        this.containerBots.set(containerId, bot);
+      }
 
-      // Load bot logic
-      const botLogicPath = path.join(containerPath, 'botLogic.js');
-      const { AIChatbot } = require(botLogicPath);
-
-      // Create bot instance with proper environment variables
-      process.env.CONTAINER_ID = containerId;
-      process.env.SESSION_ID = sessionId;
-      const bot = new AIChatbot();
-
-      // Generate AI response
-      const response = await bot.generateAIResponse(message);
+      // Generate AI response via full processing (includes RAG retrieval/ingestion)
+      const response = await bot.processMessage(message);
 
       // Log interaction to database
       await this.logInteraction(containerId, sessionId, message, response);
@@ -397,7 +406,7 @@ class ContainerManager {
       return {
         success: true,
         message: response,
-        aiName: aiConfig.name,
+        aiName: 'AI',
         timestamp: new Date().toISOString()
       };
 

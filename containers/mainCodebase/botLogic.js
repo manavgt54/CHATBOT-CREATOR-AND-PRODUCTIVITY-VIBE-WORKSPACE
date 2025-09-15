@@ -3,6 +3,7 @@ const axios = require('axios');
 const { aiConfig } = require('./ai-config.js');
 const { utils } = require('./utils.js');
 const { config } = require('./config.js');
+const { RAGManager } = require('./rag.js');
 
 /**
  * AI Chatbot Container - Main Logic
@@ -35,6 +36,9 @@ class AIChatbot {
     this.setupMiddleware();
     this.setupRoutes();
     this.initializeAI();
+
+    // Initialize simple per-container RAG manager
+    this.rag = new RAGManager({ apiKey: this.aiConfig.apiKeys?.google || config.apis.google.apiKey, dbDir: require('path').join(__dirname, 'rag_db') });
   }
 
   /**
@@ -221,11 +225,23 @@ class AIChatbot {
       // Add to conversation memory
       this.addToMemory('user', message);
 
+      // Retrieve top-k similar chunks from RAG as context
+      let ragContext = '';
+      try {
+        const retrieved = await this.rag.query(message, 5);
+        ragContext = this.rag.formatContext(retrieved);
+      } catch (e) {
+        // ignore retrieval errors
+      }
+
       // Generate AI response based on personality and capabilities
-      const response = await this.generateAIResponse(message);
+      const response = await this.generateAIResponse(message, ragContext);
       
       // Add response to conversation memory
       this.addToMemory('ai', response);
+
+      // Persist interaction into RAG
+      try { await this.rag.ingestInteraction(message, response); } catch (_) {}
 
       return response;
 
@@ -240,10 +256,10 @@ class AIChatbot {
    * @param {string} message - User message
    * @returns {Promise<string>} - Generated response
    */
-  async generateAIResponse(message) {
+  async generateAIResponse(message, ragContext = '') {
     try {
       // Try to get real AI response first
-      const realResponse = await this.getRealAIResponse(message);
+      const realResponse = await this.getRealAIResponse(message, ragContext);
       if (realResponse) {
         return realResponse;
       }
@@ -260,13 +276,13 @@ class AIChatbot {
    * @param {string} message - User message
    * @returns {Promise<string>} - AI response
    */
-  async getRealAIResponse(message) {
+  async getRealAIResponse(message, ragContext = '') {
     try {
       const { personality, name, description } = this.aiConfig;
       
       // Create strict personality-based prompt with conversation context
       const conversationContext = this.getConversationContext();
-      const systemPrompt = this.createStrictSystemPrompt(conversationContext);
+      const systemPrompt = this.createStrictSystemPrompt(conversationContext, ragContext);
 
       console.log(`🤖 Calling Gemini API for: ${message.substring(0, 50)}...`);
 
@@ -275,7 +291,7 @@ class AIChatbot {
         {
           contents: [{
             parts: [{
-              text: `${systemPrompt}\n\n${conversationContext}\n\nUser: ${message}\n\n${name}:`
+              text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}\n\nUser: ${message}\n\n${name}:`
             }]
           }],
           generationConfig: {
@@ -316,7 +332,7 @@ class AIChatbot {
    * @param {string} conversationContext - Recent conversation context
    * @returns {string} - System prompt
    */
-  createStrictSystemPrompt(conversationContext) {
+  createStrictSystemPrompt(conversationContext, ragContext = '') {
     const { name, description, personality, systemPrompt, detailedInstructions } = this.aiConfig;
     
     // Use the AI-generated detailed instructions if available
@@ -325,6 +341,8 @@ class AIChatbot {
 
 CONVERSATION CONTEXT:
 ${conversationContext}
+
+${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 
 Remember: You are ${name}, ${description}. Follow your detailed instructions exactly and maintain your unique personality throughout this conversation.`;
     }
@@ -347,6 +365,8 @@ STRICT BEHAVIOR RULES:
 
 CONVERSATION CONTEXT:
 ${conversationContext}
+
+${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 
 RESPONSE GUIDELINES:
 - Keep responses conversational and natural

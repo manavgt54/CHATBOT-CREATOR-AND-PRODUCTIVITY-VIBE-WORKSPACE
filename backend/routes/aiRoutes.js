@@ -315,4 +315,62 @@ router.delete('/delete_ai', async (req, res) => {
 
 module.exports = router;
 
+/**
+ * Authenticated routes for managing per-AI API keys
+ */
+router.post('/generate_api_key', async (req, res) => {
+  try {
+    const { containerId, label } = req.body;
+    const { userId } = req;
+
+    if (!containerId) {
+      return res.status(400).json({ success: false, message: 'Container ID is required' });
+    }
+
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'AI instance not found or access denied' });
+    }
+
+    const { apiKey, id } = await aiService.createAIAPIKey(userId, containerId, label);
+    res.json({ success: true, keyId: id, apiKey });
+  } catch (error) {
+    console.error('Generate API key error:', error);
+    res.status(500).json({ success: false, message: 'Failed to generate API key' });
+  }
+});
+
+router.get('/list_api_keys/:containerId', async (req, res) => {
+  try {
+    const { containerId } = req.params;
+    const { userId } = req;
+
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'AI instance not found or access denied' });
+    }
+
+    const keys = await aiService.listAIAPIKeys(userId, containerId);
+    res.json({ success: true, keys });
+  } catch (error) {
+    console.error('List API keys error:', error);
+    res.status(500).json({ success: false, message: 'Failed to list API keys' });
+  }
+});
+
+router.post('/revoke_api_key', async (req, res) => {
+  try {
+    const { keyId } = req.body;
+    const { userId } = req;
+    if (!keyId) {
+      return res.status(400).json({ success: false, message: 'keyId is required' });
+    }
+    await aiService.revokeAIAPIKey(userId, keyId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Revoke API key error:', error);
+    res.status(500).json({ success: false, message: 'Failed to revoke API key' });
+  }
+});
+
 

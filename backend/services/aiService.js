@@ -484,6 +484,73 @@ class AIService {
       return [];
     }
   }
+
+  /**
+   * Create API key for an AI instance
+   * @param {string} userId
+   * @param {string} containerId
+   * @param {string} label
+   * @returns {Promise<{id:string, apiKey:string}>}
+   */
+  async createAIAPIKey(userId, containerId, label = null) {
+    await this.initialize();
+    const id = uuidv4();
+    const apiKey = `${containerId.slice(0,8)}_${uuidv4().replace(/-/g, '')}`;
+
+    await this.db.runQuery(
+      `INSERT INTO ai_api_keys (id, container_id, user_id, api_key, label, created_at, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [id, containerId, userId, apiKey, label, new Date().toISOString()]
+    );
+
+    return { id, apiKey };
+  }
+
+  /**
+   * List API keys for a user and container
+   */
+  async listAIAPIKeys(userId, containerId) {
+    await this.initialize();
+    return await this.db.getRows(
+      `SELECT id, api_key, label, created_at, last_used_at, is_active
+       FROM ai_api_keys WHERE user_id = ? AND container_id = ? ORDER BY created_at DESC`,
+      [userId, containerId]
+    );
+  }
+
+  /**
+   * Revoke (deactivate) an API key
+   */
+  async revokeAIAPIKey(userId, keyId) {
+    await this.initialize();
+    await this.db.runQuery(
+      `UPDATE ai_api_keys SET is_active = 0 WHERE id = ? AND user_id = ?`,
+      [keyId, userId]
+    );
+  }
+
+  /**
+   * Resolve API key to container and user
+   */
+  async resolveAPIKey(apiKey) {
+    await this.initialize();
+    const row = await this.db.getRow(
+      `SELECT * FROM ai_api_keys WHERE api_key = ? AND is_active = 1`,
+      [apiKey]
+    );
+    return row;
+  }
+
+  /**
+   * Touch last_used_at on a key
+   */
+  async touchAPIKeyUsage(keyId) {
+    await this.initialize();
+    await this.db.runQuery(
+      `UPDATE ai_api_keys SET last_used_at = ? WHERE id = ?`,
+      [new Date().toISOString(), keyId]
+    );
+  }
 }
 
 // Create singleton instance

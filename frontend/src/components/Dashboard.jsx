@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { apiService } from '../services/api';
 import ChatInterface from './ChatInterface';
+import MiniMusicPlayer from './MiniMusicPlayer';
 
 const DashboardContainer = styled.div`
   min-height: 100vh;
@@ -31,6 +32,7 @@ const Title = styled.h1`
 const ButtonGroup = styled.div`
   display: flex;
   gap: 15px;
+  flex-wrap: wrap;
 `;
 
 const Button = styled.button`
@@ -180,6 +182,9 @@ function Dashboard({ sessionId, onLogout }) {
           <Link to="/create-ai" style={{ textDecoration: 'none' }}>
             <Button primary>Create New AI</Button>
           </Link>
+          <Link to="/music-spaces" style={{ textDecoration: 'none' }}>
+            <Button>🎵 Music Spaces</Button>
+          </Link>
           <Button onClick={handleLogout}>Logout</Button>
         </ButtonGroup>
       </Header>
@@ -231,6 +236,9 @@ function Dashboard({ sessionId, onLogout }) {
           sessionId={sessionId}
         />
       )}
+      
+      {/* Mini Music Player - Available on Dashboard */}
+      <MiniMusicPlayer />
     </DashboardContainer>
   );
 }
