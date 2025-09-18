@@ -4,6 +4,9 @@ const { aiConfig } = require('./ai-config.js');
 const { utils } = require('./utils.js');
 const { config } = require('./config.js');
 const { RAGManager } = require('./rag.js');
+const { DocStore } = require('./docStore.js');
+let pdfParse = null;
+let Tesseract = null;
 
 /**
  * AI Chatbot Container - Main Logic
@@ -39,6 +42,8 @@ class AIChatbot {
 
     // Initialize simple per-container RAG manager
     this.rag = new RAGManager({ apiKey: this.aiConfig.apiKeys?.google || config.apis.google.apiKey, dbDir: require('path').join(__dirname, 'rag_db') });
+    // Initialize per-bot document store (stores metadata; content chunking handled here and sent to RAG)
+    this.docStore = new DocStore(__dirname);
   }
 
   /**
@@ -132,6 +137,52 @@ class AIChatbot {
       }
     });
 
+    // Ingest freeform text (from PDF/OCR or plain text)
+    this.app.post('/ingest-text', async (req, res) => {
+      try {
+        const { title, text, tags } = req.body || {};
+        if (!text || typeof text !== 'string' || text.trim().length < 10) {
+          return res.status(400).json({ success: false, message: 'Provide text (>=10 chars)' });
+        }
+        const { id, chunks, doc } = this.docStore.addDocument({ title, text, tags });
+        // Push chunks into RAG for retrieval
+        let count = 0;
+        for (const c of chunks) {
+          try { await this.rag.ingestText(c, { role: 'document', title: doc.title, docId: id, tags: tags || [] }); count++; } catch (_) {}
+        }
+        return res.json({ success: true, docId: id, doc, ingestedChunks: count });
+      } catch (e) {
+        return res.status(500).json({ success: false, message: 'Failed to ingest', error: e.message });
+      }
+    });
+
+    // List ingested documents
+    this.app.get('/documents', (req, res) => {
+      try {
+        const docs = this.docStore.listDocuments();
+        return res.json({ success: true, documents: docs });
+      } catch (e) {
+        return res.status(500).json({ success: false, message: 'Failed to list documents' });
+      }
+    });
+
+    // Multipart upload for PDF/Image/Text
+    this.app.post('/ingest-file', async (req, res) => {
+      try {
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', async () => {
+          const buffer = Buffer.concat(chunks);
+          // Basic boundary parse is omitted for brevity; assume raw body is the file in demo mode
+          const result = await this.ingestFileExternal(buffer, req.headers['x-file-name'] || 'upload', req.headers['content-type'] || 'application/octet-stream', ['upload']);
+          if (!result.success) return res.status(400).json(result);
+          return res.json(result);
+        });
+      } catch (e) {
+        return res.status(500).json({ success: false, message: 'Failed to ingest file', error: e.message });
+      }
+    });
+
     // Get AI info endpoint
     this.app.get('/info', (req, res) => {
       res.json({
@@ -182,13 +233,7 @@ class AIChatbot {
    * Initialize AI with configuration
    */
   initializeAI() {
-    console.log(`🤖 Initializing AI: ${this.aiConfig.name}`);
-    console.log(`📝 Description: ${this.aiConfig.description}`);
-    console.log(`🎭 Personality: ${JSON.stringify(this.aiConfig.personality)}`);
-    console.log(`🔧 Capabilities: ${this.aiConfig.capabilities.join(', ')}`);
-    console.log(`🆔 Container ID: ${this.containerId}`);
-    console.log(`🔑 Session ID: ${this.sessionId}`);
-    console.log(`🌐 Port: ${this.port}`);
+    console.log(`🤖 ${this.aiConfig.name} ready on port ${this.port}`);
     
     // Initialize conversation memory
     this.conversationMemory = [];
@@ -212,7 +257,54 @@ class AIChatbot {
       creative_thinking: this.aiConfig.capabilities.includes('creative_thinking')
     };
 
-    console.log(`✅ Capabilities initialized:`, this.capabilities);
+    // Capabilities initialized
+  }
+
+  /**
+   * External ingestion helper for backend proxy (demo mode)
+   */
+  async ingestTextExternal(title, text, tags = []) {
+    if (!text || typeof text !== 'string' || text.trim().length < 10) {
+      return { success: false, message: 'Provide text (>=10 chars)' };
+    }
+    const { id, chunks, doc } = this.docStore.addDocument({ title, text, tags });
+    let count = 0;
+    for (const c of chunks) {
+      try { await this.rag.ingestText(c, { role: 'document', title: doc.title, docId: id, tags }); count++; } catch (_) {}
+    }
+    return { success: true, docId: id, doc, ingestedChunks: count };
+  }
+
+  /**
+   * External file ingestion (PDF/Image/Text) using in-process parsers
+   */
+  async ingestFileExternal(buffer, filename = 'upload', mimetype = 'application/octet-stream', tags = []) {
+    try {
+      let extractedText = '';
+      const lower = (mimetype || '').toLowerCase();
+      if (lower.includes('pdf') || filename.toLowerCase().endsWith('.pdf')) {
+        if (!pdfParse) pdfParse = require('pdf-parse');
+        const data = await pdfParse(buffer);
+        extractedText = data.text || '';
+      } else if (lower.startsWith('image/') || /\.(png|jpg|jpeg|gif|bmp|tiff)$/i.test(filename)) {
+        if (!Tesseract) Tesseract = require('tesseract.js');
+        const { data: { text } } = await Tesseract.recognize(buffer, 'eng');
+        extractedText = text || '';
+      } else if (lower.includes('text') || /\.(txt|md|csv|log)$/i.test(filename)) {
+        extractedText = buffer.toString('utf-8');
+      } else {
+        // Try as utf-8 text fallback
+        extractedText = buffer.toString('utf-8');
+      }
+
+      extractedText = (extractedText || '').trim();
+      if (extractedText.length < 10) {
+        return { success: false, message: 'No readable text extracted from file' };
+      }
+      return await this.ingestTextExternal(filename, extractedText, tags);
+    } catch (e) {
+      return { success: false, message: e.message };
+    }
   }
 
   /**
@@ -225,17 +317,77 @@ class AIChatbot {
       // Add to conversation memory
       this.addToMemory('user', message);
 
-      // Retrieve top-k similar chunks from RAG as context
+      // Session preference memory (simple toggle via message command)
+      const prefOn = /\b(citations?\s*on|show\s*citations\s*by\s*default)\b/i.test(message);
+      const prefOff = /\b(citations?\s*off|hide\s*citations\s*by\s*default)\b/i.test(message);
+      if (prefOn) this.sessionPrefShowCitations = true;
+      if (prefOff) this.sessionPrefShowCitations = false;
+
+      // Retrieve top-k similar chunks from RAG as context (optimized)
       let ragContext = '';
+      let sources = [];
       try {
-        const retrieved = await this.rag.query(message, 5);
-        ragContext = this.rag.formatContext(retrieved);
+        // Only do RAG query if we have enough knowledge base content
+        const index = this.rag._readIndex();
+        const minVectors = config.features.minVectorsForRagQuery;
+        let retrieved = [];
+        if (index.vectors && index.vectors.length >= minVectors) {
+          retrieved = await this.rag.query(message, 5);
+          ragContext = this.rag.formatContext(retrieved);
+        }
+        // Decide dynamically when to augment with web
+        const wantsSources = /\b(sources?|cite|citation|references?|links?|credible|credibility)\b/i.test(message);
+        const citationMode = (this.aiConfig.features && this.aiConfig.features.citationMode) || (config.features && config.features.citationMode) || 'explicit'; // 'explicit' | 'auto_on_keywords' | 'always'
+        const domainKeywords = (this.aiConfig.domain && Array.isArray(this.aiConfig.domain.keywords)) ? this.aiConfig.domain.keywords : [];
+        const isInDomain = this._isInDomain(message, domainKeywords);
+        const researchy = /\b(latest|recent|study|studies|research|paper|papers|report|reports|statistics|market size|market share|trends?)\b/i.test(message);
+        const avgConf = retrieved?.length ? (retrieved.reduce((s,c)=>s+(c.score||0),0)/retrieved.length) : 0;
+        const belowConf = avgConf < (config.features.minConfidenceForWeb || 0.55);
+        const preferInternal = !!config.features.preferInternalOverWeb;
+
+        const shouldAugment = wantsSources
+          || citationMode === 'always'
+          || (citationMode === 'auto_on_keywords' && (researchy || !isInDomain))
+          || (!preferInternal && belowConf);
+
+        if (shouldAugment) {
+          const aug = await this.rag.augmentWithWeb(message);
+          if (aug.contextBlock) {
+            ragContext = `${ragContext ? ragContext + "\n\n" : ''}${aug.contextBlock}`;
+            sources = aug.sources;
+          }
+        }
+        // If user explicitly wants sources but none were found yet, force another fetch
+        if (wantsSources && (!sources || sources.length === 0)) {
+          const aug2 = await this.rag.augmentWithWeb(message);
+          if (aug2.contextBlock) {
+            ragContext = `${ragContext ? ragContext + "\n\n" : ''}${aug2.contextBlock}`;
+            sources = aug2.sources;
+          }
+        }
       } catch (e) {
         // ignore retrieval errors
       }
 
       // Generate AI response based on personality and capabilities
-      const response = await this.generateAIResponse(message, ragContext);
+      let response = await this.generateAIResponse(message, ragContext, sources);
+
+      // If user asked for citations, enforce inline [n]
+      const wantsSources = /\b(sources?|cite|citation|references?|links?|credible|credibility)\b/i.test(message) || this.sessionPrefShowCitations === true;
+      const hasInline = /\[\d+\]/.test(response);
+      if (wantsSources && !hasInline && sources.length) {
+        // Try a second pass with explicit instruction to include inline citations
+        try {
+          const enforcementNote = `\n\nIMPORTANT: Include inline citations [1], [2] referencing the provided RELEVANT SOURCES and ensure the reasoning explains why each source is used.`;
+          response = await this.getRealAIResponse(message + enforcementNote, ragContext, sources);
+        } catch (_) {
+          // Keep first response on failure
+        }
+      }
+      // If user did NOT ask for sources, strip any accidental citation sections from the model
+      if (!wantsSources) {
+        response = this._stripCitations(response);
+      }
       
       // Add response to conversation memory
       this.addToMemory('ai', response);
@@ -243,6 +395,11 @@ class AIChatbot {
       // Persist interaction into RAG
       try { await this.rag.ingestInteraction(message, response); } catch (_) {}
 
+      // Only append Sources section when explicitly requested
+      if (wantsSources && sources && sources.length) {
+        const list = sources.map((s, i) => `- [${s.title}](${s.url})${s.snippet ? ` - ${s.snippet}` : ''}${s.reliability ? ` (Reliability: ${s.reliability})` : ''}`).join('\n');
+        return `${response}\n\nSources:\n${list}`;
+      }
       return response;
 
     } catch (error) {
@@ -252,19 +409,37 @@ class AIChatbot {
   }
 
   /**
+   * Determine if a user message is within the bot's declared domain
+   * @param {string} message
+   * @param {string[]} domainKeywords
+   * @returns {boolean}
+   */
+  _isInDomain(message, domainKeywords) {
+    try {
+      if (!domainKeywords || domainKeywords.length === 0) return true; // default: consider in-domain if unspecified
+      const lower = (message || '').toLowerCase();
+      return domainKeywords.some(k => lower.includes(String(k).toLowerCase()));
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /**
    * Generate AI response based on message content and capabilities
    * @param {string} message - User message
+   * @param {string} ragContext - RAG context
+   * @param {Array} sources - Web search sources
    * @returns {Promise<string>} - Generated response
    */
-  async generateAIResponse(message, ragContext = '') {
+  async generateAIResponse(message, ragContext = '', sources = []) {
     try {
       // Try to get real AI response first
-      const realResponse = await this.getRealAIResponse(message, ragContext);
+      const realResponse = await this.getRealAIResponse(message, ragContext, sources);
       if (realResponse) {
         return realResponse;
       }
     } catch (error) {
-      console.log('Falling back to rule-based responses:', error.message);
+      console.log('🔄 Using fallback response');
     }
     
     // Fallback to rule-based responses
@@ -274,24 +449,26 @@ class AIChatbot {
   /**
    * Get real AI response using Gemini API with strict personality adherence
    * @param {string} message - User message
+   * @param {string} ragContext - RAG context
+   * @param {Array} sources - Web search sources
    * @returns {Promise<string>} - AI response
    */
-  async getRealAIResponse(message, ragContext = '') {
+  async getRealAIResponse(message, ragContext = '', sources = []) {
     try {
       const { personality, name, description } = this.aiConfig;
       
       // Create strict personality-based prompt with conversation context
       const conversationContext = this.getConversationContext();
-      const systemPrompt = this.createStrictSystemPrompt(conversationContext, ragContext);
+      const systemPrompt = this.createStrictSystemPrompt(conversationContext, ragContext, sources);
 
-      console.log(`🤖 Calling Gemini API for: ${message.substring(0, 50)}...`);
+      console.log(`💬 Sending: ${message.substring(0, 50)}...`);
 
       const response = await axios.post(
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
         {
           contents: [{
             parts: [{
-              text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}\n\nUser: ${message}\n\n${name}:`
+              text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}${sources.length ? `\n\nRELEVANT SOURCES:\n${sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}\nRelevance: Use this source for ${s.title.includes('research') || s.title.includes('study') ? 'academic insights' : s.title.includes('news') ? 'current developments' : 'general information'}`).join('\n\n')}` : ''}\n\nUser: ${message}\n\n${name}:`
             }]
           }],
           generationConfig: {
@@ -311,18 +488,16 @@ class AIChatbot {
         }
       );
 
-      console.log(`✅ Gemini API response received:`, response.data);
-
       if (response.data.candidates && response.data.candidates.length > 0) {
         const aiResponse = response.data.candidates[0].content.parts[0].text;
-        console.log(`🎯 AI Response: ${aiResponse}`);
+        console.log(`✅ Received: ${aiResponse.substring(0, 100)}...`);
         return aiResponse;
       } else {
         throw new Error('No valid response from Gemini API');
       }
 
     } catch (error) {
-      console.error('Error calling Gemini API:', error);
+      console.log(`⚠️ API Error: ${error.message}`);
       throw error;
     }
   }
@@ -330,9 +505,11 @@ class AIChatbot {
   /**
    * Create strict system prompt that enforces AI personality and description
    * @param {string} conversationContext - Recent conversation context
+   * @param {string} ragContext - RAG context
+   * @param {Array} sources - Web search sources
    * @returns {string} - System prompt
    */
-  createStrictSystemPrompt(conversationContext, ragContext = '') {
+  createStrictSystemPrompt(conversationContext, ragContext = '', sources = []) {
     const { name, description, personality, systemPrompt, detailedInstructions } = this.aiConfig;
     
     // Use the AI-generated detailed instructions if available
@@ -344,11 +521,36 @@ ${conversationContext}
 
 ${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 
+ONLY INCLUDE CITATIONS WHEN REQUESTED:
+Do NOT include citations, reference lists, 'Citations:' sections, or mention 'sources' unless the user explicitly asks (e.g., says citations/sources/credible/reference). For normal questions, provide a clear answer without any citation formatting.
+
+${sources.length ? `CITATION REQUIREMENTS (active because sources were provided or requested):
+You have access to relevant web sources. Follow these citation guidelines:
+
+1. SYNTHESIZE INFORMATION: Don't just list sources. Explain your answer by synthesizing information from multiple references in a reasoned way.
+
+2. INLINE CITATIONS: When referencing a source for a fact or insight, mark it inline (e.g., [1], [2]) and explain how it supports your statement. Use [1], [2], [3] format throughout your response.
+
+3. SOURCE INTEGRATION: Mix sources intelligently - combine information from multiple sources in your reasoning rather than presenting them separately.
+
+4. SOURCE SELECTION: Only select sources directly related to the user's question. Avoid irrelevant sources.
+
+5. EXPLAIN CHOICES: For each source referenced in your reasoning, explain why you chose it and what unique insight it provides.
+
+6. STRUCTURE: Begin with a clear answer summary, followed by detailed reasoning with inline citations. Format: "This is supported by [1] which shows..." or "According to [2], the evidence suggests..."
+
+Available sources will be provided in the RELEVANT SOURCES section below.
+
+EXAMPLE FORMAT:
+"The EU AI Act [1] represents a landmark regulatory approach, while the OECD framework [2] provides international guidance. This combination [1,2] shows how different jurisdictions are approaching AI governance."
+
+Then provide detailed citations with explanations.` : ''}
+
 Remember: You are ${name}, ${description}. Follow your detailed instructions exactly and maintain your unique personality throughout this conversation.`;
     }
     
     // Fallback to basic instructions if detailed ones aren't available
-    return `You are ${name}. You MUST strictly follow these rules:
+  return `You are ${name}. You MUST strictly follow these rules:
 
 CORE IDENTITY:
 - Name: ${name}
@@ -362,11 +564,34 @@ STRICT BEHAVIOR RULES:
 4. Maintain your ${personality.tone} tone in EVERY response
 5. Reference your expertise areas when relevant
 6. Be consistent with your personality traits
+7. Do NOT include citations or any 'Citations:' or 'Sources:' sections unless the user explicitly asks for citations/sources/credible references.
 
 CONVERSATION CONTEXT:
 ${conversationContext}
 
 ${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
+
+${sources.length ? `CITATION REQUIREMENTS (active because sources were provided or requested):
+You have access to relevant web sources. Follow these citation guidelines:
+
+1. SYNTHESIZE INFORMATION: Don't just list sources. Explain your answer by synthesizing information from multiple references in a reasoned way.
+
+2. INLINE CITATIONS: When referencing a source for a fact or insight, mark it inline (e.g., [1], [2]) and explain how it supports your statement. Use [1], [2], [3] format throughout your response.
+
+3. SOURCE INTEGRATION: Mix sources intelligently - combine information from multiple sources in your reasoning rather than presenting them separately.
+
+4. SOURCE SELECTION: Only select sources directly related to the user's question. Avoid irrelevant sources.
+
+5. EXPLAIN CHOICES: For each source referenced in your reasoning, explain why you chose it and what unique insight it provides.
+
+6. STRUCTURE: Begin with a clear answer summary, followed by detailed reasoning with inline citations. Format: "This is supported by [1] which shows..." or "According to [2], the evidence suggests..."
+
+Available sources will be provided in the RELEVANT SOURCES section below.
+
+EXAMPLE FORMAT:
+"The EU AI Act [1] represents a landmark regulatory approach, while the OECD framework [2] provides international guidance. This combination [1,2] shows how different jurisdictions are approaching AI governance."
+
+Then provide detailed citations with explanations.` : ''}
 
 RESPONSE GUIDELINES:
 - Keep responses conversational and natural
@@ -376,6 +601,23 @@ RESPONSE GUIDELINES:
 - Maintain consistency with previous responses in this conversation
 
 Remember: You are ${name}, ${description}. Act accordingly.`;
+  }
+
+  /**
+   * Remove model-added citation blocks when not requested by user
+   */
+  _stripCitations(text) {
+    try {
+      if (!text) return text;
+      // Remove blocks starting with 'Citations:' and following bullet/numbered lines
+      let out = text.replace(/\n\s*Cit\w*ations?:[\s\S]*?($|\n\n)/gi, '\n');
+      // Remove accidental 'Sources:' blocks added by model
+      out = out.replace(/\n\s*Sources?:[\s\S]*?($|\n\n)/gi, '\n');
+      // If the model sprinkled [1],[2] without being asked, keep prose but it's okay to leave brackets; avoid aggressive stripping to not harm content
+      return out.trim();
+    } catch (_) {
+      return text;
+    }
   }
 
   /**

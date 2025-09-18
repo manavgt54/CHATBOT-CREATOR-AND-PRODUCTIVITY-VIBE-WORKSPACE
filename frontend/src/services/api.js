@@ -175,6 +175,42 @@ export const apiService = {
   },
 
   /**
+   * Ingest text into an AI container (parsed PDF/OCR/plain text)
+   */
+  async ingestText(sessionId, containerId, { title, text, tags = [] }) {
+    try {
+      const response = await apiClient.post('/ingest_text', {
+        containerId,
+        title,
+        text,
+        tags
+      }, {
+        headers: { 'x-session-id': sessionId }
+      });
+      return response;
+    } catch (error) {
+      return { success: false, message: error.message || 'Failed to ingest text' };
+    }
+  },
+
+  /**
+   * Upload a file for ingestion (PDF/Image/Text) via multipart
+   */
+  async ingestFile(sessionId, containerId, file) {
+    try {
+      const form = new FormData();
+      form.append('containerId', containerId);
+      form.append('file', file);
+      const response = await apiClient.post('/ingest_file', form, {
+        headers: { 'x-session-id': sessionId, 'Content-Type': 'multipart/form-data' }
+      });
+      return response;
+    } catch (error) {
+      return { success: false, message: error.message || 'Failed to ingest file' };
+    }
+  },
+
+  /**
    * Delete an AI chatbot instance
    * @param {string} sessionId - User session ID
    * @param {string} containerId - AI container ID

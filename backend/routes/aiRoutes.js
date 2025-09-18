@@ -4,6 +4,8 @@ const { containerManager } = require('../services/containerManager');
 const { aiService } = require('../services/aiService');
 
 const router = express.Router();
+const multer = require('multer');
+const upload = multer();
 
 // Middleware to validate session for all AI routes
 const validateSession = async (req, res, next) => {
@@ -228,6 +230,53 @@ router.post('/interact_ai', async (req, res) => {
       success: false,
       message: 'Internal server error during AI interaction'
     });
+  }
+});
+
+/**
+ * POST /api/ingest_text
+ * Ingest user-provided text into an AI container (doc store + RAG)
+ */
+router.post('/ingest_text', async (req, res) => {
+  try {
+    const { containerId, title, text, tags } = req.body;
+    const { sessionId, userId } = req;
+    if (!containerId || !text) {
+      return res.status(400).json({ success: false, message: 'containerId and text are required' });
+    }
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'AI instance not found or access denied' });
+    }
+    const result = await containerManager.ingestTextIntoContainer(containerId, title, text, tags || [], sessionId);
+    return res.json(result);
+  } catch (error) {
+    console.error('Ingest text error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to ingest text' });
+  }
+});
+
+/**
+ * POST /api/ingest_file
+ * Multipart file upload to ingest into container (PDF/Image/Text)
+ */
+router.post('/ingest_file', upload.single('file'), async (req, res) => {
+  try {
+    const { containerId } = req.body;
+    const file = req.file;
+    const { sessionId, userId } = req;
+    if (!containerId || !file) {
+      return res.status(400).json({ success: false, message: 'containerId and file are required' });
+    }
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'AI instance not found or access denied' });
+    }
+    const result = await containerManager.ingestFileIntoContainer(containerId, file.originalname, file.mimetype, file.buffer, sessionId);
+    return res.json(result);
+  } catch (error) {
+    console.error('Ingest file error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to ingest file' });
   }
 });
 

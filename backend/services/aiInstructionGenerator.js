@@ -15,9 +15,7 @@ class AIInstructionGenerator {
      */
     async generateDetailedInstructions(aiName, description, personality = 'friendly') {
         try {
-            console.log(`🎯 Generating detailed instructions for AI: ${aiName}`);
-            console.log(`📝 Description: ${description}`);
-            console.log(`🎭 Personality: ${personality}`);
+            console.log(`🎯 Generating instructions for ${aiName}...`);
 
             const prompt = `
 You are an expert AI personality designer. Create detailed, specific instructions for an AI chatbot that will make it behave exactly as the user wants.
@@ -57,8 +55,7 @@ Make it detailed, specific, and impossible to ignore. The AI should feel like a 
             const response = await result.response;
             const instructions = response.text();
 
-            console.log(`✅ Generated detailed instructions for ${aiName}`);
-            console.log(`📄 Instructions length: ${instructions.length} characters`);
+            console.log(`✅ Instructions generated (${instructions.length} chars)`);
 
             return instructions;
         } catch (error) {

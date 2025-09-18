@@ -33,15 +33,10 @@ class CreateContainerCLI {
       // Validate arguments
       this.validateArguments(sessionId, aiName, aiDescription);
 
-      console.log('🚀 Creating AI Chatbot Container...');
-      console.log(`📋 Session ID: ${sessionId}`);
-      console.log(`🤖 AI Name: ${aiName}`);
-      console.log(`📝 Description: ${aiDescription}`);
-      console.log('');
+      console.log(`🚀 Creating ${aiName}...`);
 
       // Generate unique container ID
       const containerId = uuidv4();
-      console.log(`🆔 Container ID: ${containerId}`);
 
       // Initialize container manager
       await this.containerManager.initialize();
@@ -55,13 +50,7 @@ class CreateContainerCLI {
       );
 
       if (result.success) {
-        console.log('✅ Container created successfully!');
-        console.log(`📦 Container ID: ${containerId}`);
-        console.log(`🔗 Session ID: ${sessionId}`);
-        console.log(`🤖 AI Name: ${aiName}`);
-        console.log('');
-        console.log('📊 Container Status: Running');
-        console.log('🌐 Ready for AI interactions');
+        console.log(`✅ ${aiName} is ready!`);
         
         // Return container info for other scripts
         return {

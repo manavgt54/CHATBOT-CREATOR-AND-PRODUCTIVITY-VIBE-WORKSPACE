@@ -41,11 +41,26 @@ const config = {
       temperature: 0.7
     },
   google: {
-    apiKey: process.env.GOOGLE_AI_API_KEY || 'AIzaSyCsTK0nmsF_Kl5lXgDmJCkWPWFSPDzO4lU',
+    apiKey: process.env.GOOGLE_AI_API_KEY || 'AIzaSyDbzYMmwm3gWw0EPvd1e7zLG5v6bvjkHHE',
     model: 'gemini-1.5-flash',
     maxTokens: 1000,
     temperature: 0.7
   },
+    // Optional web search providers for citations augmentation
+    search: {
+      // provider: 'google_cse' | 'brave' | 'serpapi' | 'none'
+      provider: process.env.SEARCH_PROVIDER || 'google_cse',
+      google_cse: {
+        apiKey: process.env.GOOGLE_CSE_API_KEY || 'AIzaSyC6qg8gIfE6fJ0C1OOtfU-u_NPyDoLB06o',
+        cx: process.env.GOOGLE_CSE_CX || 'c124f61e84ea74b41'
+      },
+      brave: {
+        apiKey: process.env.BRAVE_SEARCH_API_KEY || ''
+      },
+      serpapi: {
+        apiKey: process.env.SERPAPI_KEY || ''
+      }
+    },
     azure: {
       apiKey: process.env.AZURE_AI_API_KEY || '[AZURE_AI_API_KEY]',
       endpoint: process.env.AZURE_AI_ENDPOINT || '[AZURE_AI_ENDPOINT]',
@@ -112,6 +127,30 @@ const config = {
     cacheTTL: 300000 // 5 minutes
   },
 
+  // Feature flags
+  features: {
+    enableWebCitations: (process.env.ENABLE_WEB_CITATIONS || 'true') === 'true',
+    ingestFetchedSources: (process.env.INGEST_FETCHED_SOURCES || 'true') === 'true',
+    minVectorsForRagQuery: parseInt(process.env.MIN_VECTORS_FOR_RAG_QUERY || '4', 10),
+    maxSourcesPerFetch: parseInt(process.env.MAX_SOURCES_PER_FETCH || '3', 10),
+    // Dynamic citation policy controls
+    citationMode: process.env.CITATION_MODE || 'explicit', // 'explicit' | 'auto_on_keywords' | 'always'
+    webAugPolicy: process.env.WEB_AUG_POLICY || 'balanced', // 'prefer_internal' | 'balanced' | 'prefer_web'
+    minConfidenceForWeb: parseFloat(process.env.MIN_CONF_FOR_WEB || '0.55'), // average top-k similarity
+    credibilityThreshold: process.env.CREDIBILITY_THRESHOLD || 'General Web', // 'Government/Agency'|'Intergovernmental Agency'|'Academic'|'Peer-reviewed'|'News/Media'|'General Web'
+    maxWebCallsPerTurn: parseInt(process.env.MAX_WEB_CALLS_PER_TURN || '1', 10),
+    maxTotalSources: parseInt(process.env.MAX_TOTAL_SOURCES || '5', 10),
+    cacheTtlMs: parseInt(process.env.WEB_CACHE_TTL_MS || '300000', 10),
+    renderStyle: process.env.CITATION_RENDER_STYLE || 'numeric', // 'numeric'|'title'|'footnote'
+    preferInternalOverWeb: (process.env.PREFER_INTERNAL_OVER_WEB || 'true') === 'true',
+    enableConversationHistory: true,
+    enableMemoryManagement: true,
+    enableCapabilityDetection: true,
+    enablePersonalityAdaptation: true,
+    enableErrorRecovery: true,
+    enablePerformanceOptimization: true
+  },
+
   // Database settings (if needed for container-specific data)
   database: {
     enabled: false,
@@ -138,15 +177,7 @@ const config = {
     prometheusPort: 9090
   },
 
-  // Feature flags
-  features: {
-    enableConversationHistory: true,
-    enableMemoryManagement: true,
-    enableCapabilityDetection: true,
-    enablePersonalityAdaptation: true,
-    enableErrorRecovery: true,
-    enablePerformanceOptimization: true
-  },
+  
 
   // Development settings
   development: {

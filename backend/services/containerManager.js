@@ -49,7 +49,7 @@ class ContainerManager {
       // [AI_API_KEYS] - Replace with actual AI service API keys
       openai: process.env.OPENAI_API_KEY || '[OPENAI_API_KEY]',
       anthropic: process.env.ANTHROPIC_API_KEY || '[ANTHROPIC_API_KEY]',
-      google: process.env.GOOGLE_AI_API_KEY || 'AIzaSyDweaQYqsiHPnl2fVz7HYRPhZMm4YsL32k',
+      google: process.env.GOOGLE_AI_API_KEY || 'AIzaSyDbzYMmwm3gWw0EPvd1e7zLG5v6bvjkHHE',
       azure: process.env.AZURE_AI_API_KEY || '[AZURE_AI_API_KEY]'
     };
   }
@@ -146,7 +146,7 @@ class ContainerManager {
         status: this.dockerAvailable ? 'Running' : 'Running (Demo Mode)'
       });
 
-      console.log(`✅ Container ${containerId} created and started successfully`);
+      console.log(`✅ ${aiName} created successfully`);
       
       return {
         success: true,
@@ -179,7 +179,7 @@ class ContainerManager {
       // Copy main codebase files
       await this.copyDirectory(mainCodebasePath, containerPath);
 
-      console.log(`✅ Main codebase cloned to container ${containerId}`);
+      console.log(`📁 Codebase cloned`);
 
       // Initialize per-container RAG database folder
       try {
@@ -187,7 +187,7 @@ class ContainerManager {
         await fs.mkdir(ragDir, { recursive: true });
         await fs.writeFile(path.join(ragDir, 'index.json'), JSON.stringify({ vectors: [] }, null, 2), 'utf-8');
       } catch (e) {
-        console.warn(`⚠️ Failed to initialize RAG DB for ${containerId}:`, e.message);
+        // RAG DB initialization failed, continuing without it
       }
 
     } catch (error) {
@@ -209,8 +209,6 @@ class ContainerManager {
       const containerPath = path.join(__dirname, '../containers', containerId);
       const configPath = path.join(containerPath, 'ai-config.js');
 
-      console.log(`🎯 Generating detailed instructions for AI: ${aiName}`);
-      
       // Generate detailed instructions using AI
       const detailedInstructions = await this.instructionGenerator.generateDetailedInstructions(
         aiName, 
@@ -246,7 +244,7 @@ class ContainerManager {
       // Update main bot logic with AI-specific behavior
       await this.updateBotLogic(containerPath, aiConfig);
 
-      console.log(`✅ AI logic injected for container ${containerId} with detailed instructions`);
+      console.log(`✅ AI logic injected for ${aiName}`);
 
     } catch (error) {
       console.error(`❌ Failed to inject AI logic for ${containerId}:`, error);
@@ -421,6 +419,47 @@ class ContainerManager {
   }
 
   /**
+   * Ingest text into a container (demo mode direct call)
+   */
+  async ingestTextIntoContainer(containerId, title, text, tags, sessionId) {
+    try {
+      const containerPath = path.join(__dirname, '../containers', containerId);
+      await fs.access(containerPath);
+      let bot = this.containerBots.get(containerId);
+      if (!bot) {
+        const botLogicPath = path.join(containerPath, 'botLogic.js');
+        const { AIChatbot } = require(botLogicPath);
+        process.env.CONTAINER_ID = containerId;
+        process.env.SESSION_ID = sessionId;
+        bot = new AIChatbot();
+        this.containerBots.set(containerId, bot);
+      }
+      return await bot.ingestTextExternal(title, text, tags);
+    } catch (error) {
+      return { success: false, message: error.message };
+    }
+  }
+
+  async ingestFileIntoContainer(containerId, filename, mimetype, buffer, sessionId) {
+    try {
+      const containerPath = path.join(__dirname, '../containers', containerId);
+      await fs.access(containerPath);
+      let bot = this.containerBots.get(containerId);
+      if (!bot) {
+        const botLogicPath = path.join(containerPath, 'botLogic.js');
+        const { AIChatbot } = require(botLogicPath);
+        process.env.CONTAINER_ID = containerId;
+        process.env.SESSION_ID = sessionId;
+        bot = new AIChatbot();
+        this.containerBots.set(containerId, bot);
+      }
+      return await bot.ingestFileExternal(buffer, filename, mimetype, ['upload']);
+    } catch (error) {
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
    * Log AI interaction to database
    * @param {string} containerId - Container ID
    * @param {string} sessionId - Session ID
@@ -431,7 +470,7 @@ class ContainerManager {
   async logInteraction(containerId, sessionId, userMessage, aiResponse) {
     try {
       // This would require database access - for now just log to console
-      console.log(`💬 AI Interaction - Container: ${containerId}, User: "${userMessage}", AI: "${aiResponse.substring(0, 50)}..."`);
+      console.log(`💬 ${containerId}: "${userMessage}" → "${aiResponse.substring(0, 50)}..."`);
     } catch (error) {
       console.error('Error logging interaction:', error);
     }
@@ -563,7 +602,7 @@ class ContainerManager {
     try {
       // The bot logic is already updated in the main codebase
       // We just need to ensure the AI config is properly set
-      console.log(`✅ Bot logic updated for container ${aiConfig.id} with port ${aiConfig.port}`);
+      // Bot logic updated
 
     } catch (error) {
       console.error('Failed to update bot logic:', error);

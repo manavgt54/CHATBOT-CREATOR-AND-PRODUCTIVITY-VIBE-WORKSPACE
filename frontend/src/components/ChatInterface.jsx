@@ -3,6 +3,231 @@ import styled from 'styled-components';
 import { apiService } from '../services/api';
 import MiniMusicPlayer from './MiniMusicPlayer';
 
+// Citation Button Component with Popup
+function CitationButton({ source, citationNum }) {
+  const [showPopup, setShowPopup] = useState(false);
+  const popupRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (popupRef.current && !popupRef.current.contains(event.target)) {
+        setShowPopup(false);
+      }
+    }
+
+    if (showPopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showPopup]);
+
+  const handleClick = (e) => {
+    e.preventDefault();
+    setShowPopup(!showPopup);
+  };
+
+  // Prepare short description and reliability label for popup
+  const description = (source.description || source.snippet || '').trim();
+  const shortDesc = description ? description.replace(/\s+/g, ' ').slice(0, 200) : 'No preview available';
+  const reliability = (source.reliability || 'Unknown').trim();
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={handleClick}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#667eea',
+          textDecoration: 'underline',
+          cursor: 'pointer',
+          padding: '2px 4px',
+          borderRadius: '3px',
+          fontSize: 'inherit',
+          fontWeight: '600'
+        }}
+        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f4ff'}
+        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+      >
+        [{citationNum}]
+      </button>
+      
+      {showPopup && (
+        <div
+          ref={popupRef}
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'white',
+            border: '1px solid #e1e5e9',
+            borderRadius: '8px',
+            padding: '12px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            zIndex: 1000,
+            minWidth: '300px',
+            maxWidth: '400px',
+            marginTop: '4px'
+          }}
+        >
+          <div style={{ fontSize: '14px', fontWeight: '600', color: '#333', marginBottom: '8px' }}>
+            {source.title}
+          </div>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px', lineHeight: '1.4' }}>{shortDesc}</div>
+          <div style={{ fontSize: '11px', color: '#999', marginBottom: '8px' }}>Reliability: {reliability}</div>
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              fontSize: '12px',
+              color: '#667eea',
+              textDecoration: 'underline',
+              display: 'block'
+            }}
+          >
+            View Source →
+          </a>
+        </div>
+      )}
+    </span>
+  );
+}
+
+function renderMessageText(text) {
+  if (typeof text !== 'string') return text;
+  
+  // Detect trailing Sources section and make it collapsible
+  const sourcesMatch = text.match(/^(.*?)\n\nSources:\n(.*)$/s);
+  if (sourcesMatch) {
+    const [_, body, sourcesBlock] = sourcesMatch;
+    const links = sourcesBlock
+      .split(/\n+/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    // Extract source data for inline citations with optional description and reliability
+    const sourceData = links.map((line, idx) => {
+      // Supported formats:
+      // - [Title](URL)
+      // - [Title](URL) - short description
+      // - [Title](URL) - short description (Reliability: Peer-reviewed)
+      const match = line.match(/^[-*]\s*\[(.*?)\]\((.*?)\)\s*(?:-\s*(.*?))?\s*(?:\(\s*Reliability:\s*([^)]*)\))?\s*$/);
+      if (match) {
+        const title = match[1];
+        const url = match[2];
+        const description = match[3] || '';
+        const reliability = (match[4] || '').trim();
+        return {
+          index: idx + 1,
+          title,
+          url,
+          description,
+          reliability
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    // Process body text to make inline citations clickable
+    const processBodyWithCitations = (bodyText) => {
+      const citationRegex = /\[(\d+)\]/g;
+      const parts = [];
+      let lastIndex = 0;
+      let match;
+
+      while ((match = citationRegex.exec(bodyText)) !== null) {
+        // Add text before the citation
+        if (match.index > lastIndex) {
+          parts.push(bodyText.slice(lastIndex, match.index));
+        }
+        
+        // Add the clickable citation
+        const citationNum = parseInt(match[1]);
+        const source = sourceData.find(s => s.index === citationNum);
+        
+        if (source) {
+          parts.push(
+            <CitationButton 
+              key={match.index} 
+              source={source}
+              citationNum={citationNum}
+            />
+          );
+        } else {
+          parts.push(match[0]); // Fallback to plain text
+        }
+        
+        lastIndex = match.index + match[0].length;
+      }
+      
+      // Add remaining text
+      if (lastIndex < bodyText.length) {
+        parts.push(bodyText.slice(lastIndex));
+      }
+      
+      return parts.length > 1 ? parts : bodyText;
+    };
+
+    return (
+      <div>
+        <div style={{ whiteSpace: 'pre-wrap' }}>
+          {processBodyWithCitations(body)}
+        </div>
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', color: '#667eea', fontWeight: 600 }}>Sources</summary>
+          <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+            {links.map((line, idx) => {
+              // Expect format: - [Title](URL)
+              const match = line.match(/^-\s*\[(.*?)\]\((.*?)\)/);
+              if (match) {
+                const title = match[1];
+                const url = match[2];
+                return (
+                  <li key={idx}>
+                    <a href={url} target="_blank" rel="noreferrer">{title}</a>
+                  </li>
+                );
+              }
+              return <li key={idx} style={{ whiteSpace: 'pre-wrap' }}>{line}</li>;
+            })}
+          </ul>
+        </details>
+      </div>
+    );
+  }
+
+  // Handle inline markdown links and make them clickable
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    // Add the link
+    parts.push(
+      <a key={match.index} href={match[2]} target="_blank" rel="noreferrer" style={{ color: '#667eea', textDecoration: 'underline' }}>
+        {match[1]}
+      </a>
+    );
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 1 ? <div style={{ whiteSpace: 'pre-wrap' }}>{parts}</div> : text;
+}
+
 const ChatContainer = styled.div`
   position: fixed;
   top: 0;
@@ -318,7 +543,7 @@ function ChatInterface({ ai, onClose, sessionId }) {
             <Message key={message.id} isUser={message.isUser}>
               <div>
                 <MessageBubble isUser={message.isUser}>
-                  {message.text}
+                  {renderMessageText(message.text)}
                 </MessageBubble>
                 <MessageTime isUser={message.isUser}>
                   {formatTime(message.timestamp)}
@@ -346,6 +571,30 @@ function ChatInterface({ ai, onClose, sessionId }) {
         </MessagesContainer>
         
         <InputContainer>
+          <label htmlFor="doc-upload" style={{ alignSelf: 'center', cursor: 'pointer' }} title="Upload PDF/Image/Text">
+            📎
+          </label>
+          <input
+            id="doc-upload"
+            type="file"
+            accept=".pdf,.txt,image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const files = Array.from(e.target.files || []);
+              if (!files.length) return;
+              for (const file of files) {
+                try {
+                  const resp = await apiService.ingestFile(sessionId, ai.containerId, file);
+                  if (!resp.success) alert(`${file.name}: ${resp.message || 'Failed to ingest file'}`);
+                  else alert(`Ingested ${resp.ingestedChunks} chunks from ${file.name}`);
+                } catch (err) {
+                  alert(`${file.name}: Failed to upload file.`);
+                }
+              }
+              e.target.value = '';
+            }}
+          />
           <MessageInput
             type="text"
             value={inputMessage}

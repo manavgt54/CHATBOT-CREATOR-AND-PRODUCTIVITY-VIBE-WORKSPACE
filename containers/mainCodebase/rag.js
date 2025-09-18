@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { config } = require('./config');
 
 /**
  * Simple per-container RAG manager using Gemini embeddings.
@@ -15,6 +16,8 @@ class RAGManager {
     this.maxChunkChars = options.maxChunkChars || 800; // ~512-800 chars per chunk
     this.minChunkChars = 200;
     this.topKDefault = 5;
+    this.embeddingCache = new Map(); // Cache embeddings to avoid duplicate API calls
+    this.webCache = new Map(); // Cache web search results by query
     this._ensureDb();
   }
 
@@ -61,6 +64,13 @@ class RAGManager {
 
   async _embed(text) {
     if (!text) return [];
+    
+    // Check cache first
+    const cacheKey = text.substring(0, 100); // Use first 100 chars as cache key
+    if (this.embeddingCache.has(cacheKey)) {
+      return this.embeddingCache.get(cacheKey);
+    }
+    
     const apiKey = this.googleApiKey;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.embeddingModel}:embedContent`;
     const body = {
@@ -71,7 +81,128 @@ class RAGManager {
       headers: { 'Content-Type': 'application/json' }
     });
     const vec = resp?.data?.embedding?.values || [];
+    
+    // Cache the result
+    this.embeddingCache.set(cacheKey, vec);
+    
     return vec;
+  }
+
+  /**
+   * Lightweight web search using configured provider
+   */
+  async webSearch(query, limit = config.features.maxSourcesPerFetch) {
+    const provider = config.apis.search.provider;
+    if (!provider || provider === 'none') return [];
+    try {
+      // serve from cache if fresh
+      const cacheKey = `${provider}:${query}`;
+      const now = Date.now();
+      const cached = this.webCache.get(cacheKey);
+      if (cached && (now - cached.t) < config.features.cacheTtlMs) {
+        return cached.items.slice(0, limit);
+      }
+      if (provider === 'google_cse' && config.apis.search.google_cse.apiKey && config.apis.search.google_cse.cx) {
+        const resp = await axios.get('https://www.googleapis.com/customsearch/v1', {
+          params: {
+            key: config.apis.search.google_cse.apiKey,
+            cx: config.apis.search.google_cse.cx,
+            q: query,
+            num: Math.min(limit, 5)
+          }
+        });
+        const items = resp?.data?.items || [];
+        const mapped = items.slice(0, limit).map(it => ({
+          title: it.title,
+          url: it.link,
+          snippet: it.snippet || '',
+          reliability: this._classifyReliability(it.link)
+        }));
+        this.webCache.set(cacheKey, { t: now, items: mapped });
+        return mapped;
+      }
+      if (provider === 'brave' && config.apis.search.brave.apiKey) {
+        const resp = await axios.get('https://api.search.brave.com/res/v1/web/search', {
+          headers: { 'X-Subscription-Token': config.apis.search.brave.apiKey },
+          params: { q: query, count: Math.min(limit, 5) }
+        });
+        const results = resp?.data?.web?.results || [];
+        const mapped = results.slice(0, limit).map(r => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.description || r.page_fetched || '',
+          reliability: this._classifyReliability(r.url)
+        }));
+        this.webCache.set(cacheKey, { t: now, items: mapped });
+        return mapped;
+      }
+      if (provider === 'serpapi' && config.apis.search.serpapi.apiKey) {
+        const resp = await axios.get('https://serpapi.com/search.json', {
+          params: { engine: 'google', q: query, api_key: config.apis.search.serpapi.apiKey, num: Math.min(limit, 5) }
+        });
+        const results = resp?.data?.organic_results || [];
+        const mapped = results.slice(0, limit).map(r => ({
+          title: r.title,
+          url: r.link,
+          snippet: r.snippet || '',
+          reliability: this._classifyReliability(r.link)
+        }));
+        this.webCache.set(cacheKey, { t: now, items: mapped });
+        return mapped;
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * Attempt to fetch and format sources for citations
+   */
+  async augmentWithWeb(query) {
+    let hits = await this.webSearch(query, config.features.maxSourcesPerFetch);
+    // If user asks for credible/scholarly/government sources, filter by reliability tiers
+    const credibleOnly = /\b(credible|credibility|peer[- ]?reviewed|scholarly|academic|government|agency|trusted)\b/i.test(query);
+    if (credibleOnly) {
+      const allow = new Set(['Government/Agency', 'Intergovernmental Agency', 'Academic', 'Peer-reviewed']);
+      hits = hits.filter(h => allow.has(h.reliability));
+    }
+    // Apply global credibility threshold filter
+    const tiers = ['Government/Agency','Intergovernmental Agency','Academic','Peer-reviewed','Preprint','Encyclopedia','News/Media','General Web'];
+    const minTierIdx = Math.max(0, tiers.indexOf(config.features.credibilityThreshold));
+    if (minTierIdx >= 0) {
+      hits = hits.filter(h => tiers.indexOf(h.reliability) <= minTierIdx || tiers.indexOf(h.reliability) === -1);
+    }
+    // Enforce max total sources
+    hits = hits.slice(0, config.features.maxTotalSources);
+    if (!hits.length) return { sources: [], contextBlock: '' };
+    // Optionally ingest snippets into RAG for future queries
+    if (config.features.ingestFetchedSources) {
+      for (const h of hits) {
+        const snippet = `${h.title}\n${h.snippet}\n${h.url}`.trim();
+        try { await this.ingestText(snippet, { role: 'source', url: h.url, title: h.title }); } catch (_) {}
+      }
+    }
+    const lines = hits.map((h, i) => `[#${i + 1}] ${h.title} — ${h.url}${h.snippet ? `\n${h.snippet}` : ''}${h.reliability ? `\nReliability: ${h.reliability}` : ''}`);
+    const contextBlock = `SOURCES\n${lines.join('\n')}`;
+    return { sources: hits, contextBlock };
+  }
+
+  _classifyReliability(url) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      if (host.endsWith('.gov') || host.includes('nasa.gov') || host.includes('energy.gov')) return 'Government/Agency';
+      if (host.endsWith('.edu')) return 'Academic';
+      if (host.includes('iaea.org') || host.includes('oecd.org') || host.includes('europa.eu') || host.includes('who.int')) return 'Intergovernmental Agency';
+      if (host.includes('nature.com') || host.includes('science.org') || host.includes('sciencedirect.com') || host.includes('springer.com') || host.includes('ieee.org') || host.includes('acm.org')) return 'Peer-reviewed';
+      if (host.includes('arxiv.org')) return 'Preprint';
+      if (host.includes('wikipedia.org')) return 'Encyclopedia';
+      if (host.includes('nytimes.com') || host.includes('bbc.co') || host.includes('reuters.com') || host.includes('apnews.com')) return 'News/Media';
+      return 'General Web';
+    } catch (_) {
+      return 'General Web';
+    }
   }
 
   _cosineSim(a, b) {
@@ -107,11 +238,19 @@ class RAGManager {
   }
 
   /**
-   * Ingest a message pair from the conversation
+   * Ingest a message pair from the conversation (optimized - single embedding call)
    */
   async ingestInteraction(userMessage, aiMessage) {
-    if (userMessage) await this.ingestText(userMessage, { role: 'user' });
-    if (aiMessage) await this.ingestText(aiMessage, { role: 'ai' });
+    if (!userMessage && !aiMessage) return;
+    
+    // Combine both messages into one text for single embedding call
+    const combinedText = [userMessage, aiMessage].filter(Boolean).join('\n---\n');
+    await this.ingestText(combinedText, { 
+      role: 'interaction',
+      userMessage: userMessage,
+      aiMessage: aiMessage,
+      timestamp: new Date().toISOString()
+    });
   }
 
   /**
