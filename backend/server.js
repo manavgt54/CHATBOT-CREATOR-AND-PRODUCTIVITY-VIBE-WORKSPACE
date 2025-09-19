@@ -28,7 +28,7 @@ const wss = new WebSocket.Server({ server });
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.NODE_ENV === 'production' ? true : (process.env.FRONTEND_URL || 'http://localhost:3000'),
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
