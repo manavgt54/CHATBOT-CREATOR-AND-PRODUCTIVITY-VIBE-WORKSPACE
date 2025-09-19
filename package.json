@@ -10,6 +10,8 @@
     "frontend:dev": "cd frontend && npm start",
     "install:all": "npm install && cd frontend && npm install",
     "build": "cd frontend && npm run build",
+    "build:render": "npm ci --only=production && cd frontend && npm ci --only=production && npm run build && cd ../containers/mainCodebase && npm ci --only=production",
+    "start:render": "chmod +x render-start.sh && ./render-start.sh",
     "docker:build": "docker build -t ai-chatbot-platform .",
     "docker:run": "docker run -d --name ai-platform -p 5000:5000 -p 3000:3000 --env-file .env ai-chatbot-platform",
     "docker:compose": "docker-compose up -d",

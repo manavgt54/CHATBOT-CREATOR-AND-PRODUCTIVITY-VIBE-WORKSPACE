@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: ai-chatbot-platform
+    env: node
+    plan: starter
+    buildCommand: |
+      npm install
+      cd frontend && npm install && npm run build
+      cd ../containers/mainCodebase && npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: FRONTEND_PORT
+        value: 3000
+      - key: DB_PATH
+        value: ./database/ai_platform.db
+      - key: GOOGLE_AI_API_KEY
+        sync: false
+      - key: GOOGLE_DESCRIPTION_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_CX
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CONTAINER_BASE_PORT
+        value: 3001
+      - key: MAX_CONTAINERS
+        value: 50
+      - key: SEARCH_PROVIDER
+        value: google_cse
+      - key: MAX_TOTAL_SOURCES
+        value: 5
+      - key: LOG_LEVEL
+        value: info
