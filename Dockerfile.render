@@ -18,21 +18,19 @@ COPY package*.json ./
 COPY frontend/package*.json ./frontend/
 COPY containers/mainCodebase/package*.json ./containers/mainCodebase/
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-RUN cd frontend && npm ci --only=production && npm cache clean --force
-RUN cd containers/mainCodebase && npm ci --only=production && npm cache clean --force
+# Install dependencies (use npm install to avoid lock file issues)
+RUN npm install --only=production
+RUN cd frontend && npm install --only=production
+RUN cd containers/mainCodebase && npm install --only=production
 
 # Copy application code
 COPY backend/ ./backend/
 COPY containers/mainCodebase/ ./containers/mainCodebase/
 COPY cli/ ./cli/
+COPY frontend/ ./frontend/
 
 # Build frontend
 RUN cd frontend && npm run build
-
-# Copy built frontend
-COPY --from=0 /app/frontend/build ./frontend/build
 
 # Create necessary directories
 RUN mkdir -p ./database ./uploads ./containers ./logs
