@@ -15,7 +15,11 @@
     "docker:compose": "docker-compose up -d",
     "docker:logs": "docker-compose logs -f",
     "docker:stop": "docker-compose down",
-    "docker:clean": "docker-compose down -v && docker system prune -f"
+    "docker:clean": "docker-compose down -v && docker system prune -f",
+    "optimize:cleanup": "node scripts/cleanup-node-modules.js",
+    "optimize:containers": "node scripts/optimize-containers.js",
+    "optimize:all": "npm run optimize:cleanup && npm run optimize:containers",
+    "containers:delete-all": "node scripts/delete-all-containers.js"
   },
   "keywords": [
     "ai",
@@ -31,6 +35,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dockerode": "^4.0.2",
+    "dotenv": "^17.2.2",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",

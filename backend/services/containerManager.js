@@ -674,13 +674,68 @@ class ContainerManager {
         const destPath = path.join(dest, entry.name);
 
         if (entry.isDirectory()) {
-          await this.copyDirectory(srcPath, destPath);
+          // Special handling for node_modules - create symlink instead of copying
+          if (entry.name === 'node_modules') {
+            try {
+              // Check if shared node_modules exists in mainCodebase
+              const sharedNodeModules = path.join(__dirname, '../containers/mainCodebase/node_modules');
+              const sharedNodeModulesExists = await fs.access(sharedNodeModules).then(() => true).catch(() => false);
+              
+              if (sharedNodeModulesExists) {
+                // Create symlink to shared node_modules
+                await this.createSymlink(sharedNodeModules, destPath);
+                console.log(`🔗 Created symlink for node_modules in ${path.basename(dest)}`);
+              } else {
+                // Fallback: copy node_modules if shared doesn't exist
+                await this.copyDirectory(srcPath, destPath);
+              }
+            } catch (symlinkError) {
+              console.warn(`⚠️  Failed to create symlink for node_modules, falling back to copy:`, symlinkError.message);
+              await this.copyDirectory(srcPath, destPath);
+            }
+          } else {
+            await this.copyDirectory(srcPath, destPath);
+          }
         } else {
           await fs.copyFile(srcPath, destPath);
         }
       }
     } catch (error) {
       console.error('Failed to copy directory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create symlink (cross-platform)
+   * @param {string} target - Target path
+   * @param {string} linkPath - Link path
+   * @returns {Promise<void>}
+   */
+  async createSymlink(target, linkPath) {
+    try {
+      // Remove existing file/directory if it exists
+      try {
+        await fs.unlink(linkPath);
+      } catch (e) {
+        // Ignore if doesn't exist
+      }
+
+      // Create symlink
+      if (process.platform === 'win32') {
+        // Windows: Use junction for directories, symlink for files
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        // Use mklink /J for directory junctions on Windows
+        await execAsync(`mklink /J "${linkPath}" "${target}"`);
+      } else {
+        // Unix-like systems: Use fs.symlink
+        await fs.symlink(target, linkPath);
+      }
+    } catch (error) {
+      console.error(`Failed to create symlink from ${target} to ${linkPath}:`, error);
       throw error;
     }
   }

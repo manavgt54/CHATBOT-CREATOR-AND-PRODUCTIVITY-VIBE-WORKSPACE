@@ -3,7 +3,10 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 class AIInstructionGenerator {
     constructor() {
         // Use dedicated API key for description generation
-        const apiKey = process.env.GOOGLE_DESCRIPTION_API_KEY || 'AIzaSyCxtQVXb1MtoTB795RkwCE_whmfl2sAZdw';
+        const apiKey = process.env.GOOGLE_DESCRIPTION_API_KEY;
+        if (!apiKey) {
+            throw new Error('GOOGLE_DESCRIPTION_API_KEY environment variable is required');
+        }
         this.genAI = new GoogleGenerativeAI(apiKey);
         this.model = this.genAI.getGenerativeModel({ 
             model: 'gemini-1.5-flash',

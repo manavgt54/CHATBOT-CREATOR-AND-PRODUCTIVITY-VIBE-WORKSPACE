@@ -1,6 +1,10 @@
+const path = require('path');
+
+// Load environment variables from root .env file
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const WebSocket = require('ws');
 const http = require('http');
 

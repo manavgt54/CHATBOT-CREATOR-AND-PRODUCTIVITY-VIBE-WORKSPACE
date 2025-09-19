@@ -41,13 +41,13 @@ const config = {
       temperature: 0.7
     },
   google: {
-    apiKey: process.env.GOOGLE_AI_API_KEY || 'AIzaSyDbzYMmwm3gWw0EPvd1e7zLG5v6bvjkHHE',
+    apiKey: process.env.GOOGLE_AI_API_KEY,
     model: 'gemini-1.5-flash',
     maxTokens: 1000,
     temperature: 0.7
   },
   google_description: {
-    apiKey: process.env.GOOGLE_DESCRIPTION_API_KEY || 'AIzaSyCxtQVXb1MtoTB795RkwCE_whmfl2sAZdw',
+    apiKey: process.env.GOOGLE_DESCRIPTION_API_KEY,
     model: 'gemini-1.5-flash',
     maxTokens: 2000,
     temperature: 0.8
@@ -57,8 +57,8 @@ const config = {
       // provider: 'google_cse' | 'brave' | 'serpapi' | 'none'
       provider: process.env.SEARCH_PROVIDER || 'google_cse',
       google_cse: {
-        apiKey: process.env.GOOGLE_CSE_API_KEY || 'AIzaSyC6qg8gIfE6fJ0C1OOtfU-u_NPyDoLB06o',
-        cx: process.env.GOOGLE_CSE_CX || 'c124f61e84ea74b41'
+        apiKey: process.env.GOOGLE_CSE_API_KEY,
+        cx: process.env.GOOGLE_CSE_CX
       },
       brave: {
         apiKey: process.env.BRAVE_SEARCH_API_KEY || ''
@@ -220,19 +220,27 @@ function validateConfig() {
     warnings.push('AI description not configured, using default');
   }
 
-  // Validate API keys (check for placeholder values)
+  // Validate API keys (check for missing or placeholder values)
   const apiKeys = [
     { name: 'OpenAI', key: config.apis.openai.apiKey },
     { name: 'Anthropic', key: config.apis.anthropic.apiKey },
     { name: 'Google', key: config.apis.google.apiKey },
+    { name: 'Google Description', key: config.apis.google_description.apiKey },
     { name: 'Azure', key: config.apis.azure.apiKey }
   ];
 
   apiKeys.forEach(api => {
-    if (api.key.includes('[') && api.key.includes(']')) {
-      warnings.push(`${api.name} API key not configured (placeholder detected)`);
+    if (!api.key || api.key.includes('[') && api.key.includes(']')) {
+      warnings.push(`${api.name} API key not configured (missing or placeholder detected)`);
     }
   });
+
+  // Validate search API keys
+  if (config.search && config.search.provider === 'google_cse') {
+    if (!config.search.google_cse.apiKey || !config.search.google_cse.cx) {
+      warnings.push('Google CSE API key or CX not configured');
+    }
+  }
 
   // Validate cloud credentials
   const cloudCreds = [
