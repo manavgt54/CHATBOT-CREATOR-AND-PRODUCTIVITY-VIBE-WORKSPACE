@@ -335,11 +335,19 @@ class AIChatbot {
           retrieved = await this.rag.query(message, 5);
           ragContext = this.rag.formatContext(retrieved);
         }
-        // Decide dynamically when to augment with web
-        const wantsSources = /\b(sources?|cite|citation|references?|links?|credible|credibility)\b/i.test(message);
+        // Decide dynamically when to augment with web - be more precise about citation requests
+        const wantsSources = /\b(sources?|cite|citation|references?|links?|find\s+(me\s+)?(sources?|citations?|references?|links?)|provide\s+(sources?|citations?|references?|links?)|give\s+(me\s+)?(sources?|citations?|references?|links?)|show\s+(me\s+)?(sources?|citations?|references?|links?))\b/i.test(message);
         const citationMode = (this.aiConfig.features && this.aiConfig.features.citationMode) || (config.features && config.features.citationMode) || 'explicit'; // 'explicit' | 'auto_on_keywords' | 'always'
         const domainKeywords = (this.aiConfig.domain && Array.isArray(this.aiConfig.domain.keywords)) ? this.aiConfig.domain.keywords : [];
         const isInDomain = this._isInDomain(message, domainKeywords);
+        
+        // Strict domain enforcement - if bot has domain keywords, enforce them
+        if (domainKeywords.length > 0 && !isInDomain) {
+          const domainList = domainKeywords.join(', ');
+          const response = `I'm ${this.aiConfig.name}, specialized in ${domainList}. I focus on topics within my expertise area. Could you ask me something related to ${domainList}?`;
+          this.addToMemory('assistant', response);
+          return response;
+        }
         const researchy = /\b(latest|recent|study|studies|research|paper|papers|report|reports|statistics|market size|market share|trends?)\b/i.test(message);
         const avgConf = retrieved?.length ? (retrieved.reduce((s,c)=>s+(c.score||0),0)/retrieved.length) : 0;
         const belowConf = avgConf < (config.features.minConfidenceForWeb || 0.55);
@@ -351,7 +359,7 @@ class AIChatbot {
           || (!preferInternal && belowConf);
 
         if (shouldAugment) {
-          const aug = await this.rag.augmentWithWeb(message);
+          const aug = await this.rag.augmentWithWeb(message, this.aiConfig.personality);
           if (aug.contextBlock) {
             ragContext = `${ragContext ? ragContext + "\n\n" : ''}${aug.contextBlock}`;
             sources = aug.sources;
@@ -359,7 +367,7 @@ class AIChatbot {
         }
         // If user explicitly wants sources but none were found yet, force another fetch
         if (wantsSources && (!sources || sources.length === 0)) {
-          const aug2 = await this.rag.augmentWithWeb(message);
+          const aug2 = await this.rag.augmentWithWeb(message, this.aiConfig.personality);
           if (aug2.contextBlock) {
             ragContext = `${ragContext ? ragContext + "\n\n" : ''}${aug2.contextBlock}`;
             sources = aug2.sources;
@@ -372,8 +380,8 @@ class AIChatbot {
       // Generate AI response based on personality and capabilities
       let response = await this.generateAIResponse(message, ragContext, sources);
 
-      // If user asked for citations, enforce inline [n]
-      const wantsSources = /\b(sources?|cite|citation|references?|links?|credible|credibility)\b/i.test(message) || this.sessionPrefShowCitations === true;
+      // If user asked for citations, enforce inline [n] - use same precise pattern
+      const wantsSources = /\b(sources?|cite|citation|references?|links?|find\s+(me\s+)?(sources?|citations?|references?|links?)|provide\s+(sources?|citations?|references?|links?)|give\s+(me\s+)?(sources?|citations?|references?|links?)|show\s+(me\s+)?(sources?|citations?|references?|links?))\b/i.test(message) || this.sessionPrefShowCitations === true;
       const hasInline = /\[\d+\]/.test(response);
       if (wantsSources && !hasInline && sources.length) {
         // Try a second pass with explicit instruction to include inline citations
@@ -418,7 +426,16 @@ class AIChatbot {
     try {
       if (!domainKeywords || domainKeywords.length === 0) return true; // default: consider in-domain if unspecified
       const lower = (message || '').toLowerCase();
-      return domainKeywords.some(k => lower.includes(String(k).toLowerCase()));
+      
+      // Check for exact keyword matches
+      const hasKeyword = domainKeywords.some(k => lower.includes(String(k).toLowerCase()));
+      
+      // Also check for common greetings and basic interactions (always allow these)
+      const isGreeting = /\b(hello|hi|hey|good morning|good afternoon|good evening|greetings|what's up|how are you|thanks|thank you|bye|goodbye)\b/i.test(message);
+      const isBasicQuestion = /\b(what|who|how|when|where|why|can you|could you|help|assist)\b/i.test(message);
+      
+      // Allow greetings, basic questions, and domain-related content
+      return hasKeyword || isGreeting || isBasicQuestion;
     } catch (_) {
       return true;
     }
@@ -447,6 +464,29 @@ class AIChatbot {
   }
 
   /**
+   * Exponential backoff retry for API calls
+   */
+  async _retryWithBackoff(apiCall, maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await apiCall();
+      } catch (error) {
+        const isRateLimit = error.response?.status === 429;
+        const isLastAttempt = attempt === maxRetries - 1;
+        
+        if (!isRateLimit || isLastAttempt) {
+          throw error;
+        }
+        
+        // Exponential backoff: 2s, 4s, 8s
+        const delay = Math.pow(2, attempt + 1) * 1000;
+        console.log(`⏳ Rate limited, retrying in ${delay/1000}s (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  /**
    * Get real AI response using Gemini API with strict personality adherence
    * @param {string} message - User message
    * @param {string} ragContext - RAG context
@@ -461,32 +501,34 @@ class AIChatbot {
       const conversationContext = this.getConversationContext();
       const systemPrompt = this.createStrictSystemPrompt(conversationContext, ragContext, sources);
 
-      console.log(`💬 Sending: ${message.substring(0, 50)}...`);
+      console.log(`💬 Sending: ${message.substring(0, 50)}... using RESPONSE API`);
 
-      const response = await axios.post(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
-        {
-          contents: [{
-            parts: [{
-              text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}${sources.length ? `\n\nRELEVANT SOURCES:\n${sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}\nRelevance: Use this source for ${s.title.includes('research') || s.title.includes('study') ? 'academic insights' : s.title.includes('news') ? 'current developments' : 'general information'}`).join('\n\n')}` : ''}\n\nUser: ${message}\n\n${name}:`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1000,
-          }
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
+      const response = await this._retryWithBackoff(async () => {
+        return await axios.post(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+          {
+            contents: [{
+              parts: [{
+                text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}${sources.length ? `\n\nRELEVANT SOURCES:\n${sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}\nRelevance: Use this source for ${s.title.includes('research') || s.title.includes('study') ? 'academic insights' : s.title.includes('news') ? 'current developments' : 'general information'}`).join('\n\n')}` : ''}\n\nUser: ${message}\n\n${name}:`
+              }]
+            }],
+            generationConfig: {
+              temperature: 0.7,
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 1000,
+            }
           },
-          params: {
-            key: this.aiConfig.apiKeys?.google || config.apis.google.apiKey
+          {
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            params: {
+              key: this.aiConfig.apiKeys?.google || config.apis.google.apiKey
+            }
           }
-        }
-      );
+        );
+      });
 
       if (response.data.candidates && response.data.candidates.length > 0) {
         const aiResponse = response.data.candidates[0].content.parts[0].text;
@@ -521,11 +563,14 @@ ${conversationContext}
 
 ${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 
+CITATION CAPABILITIES:
+You have the ability to search the web and provide real citations when requested. When sources are provided below, you CAN and SHOULD use them to support your answers with inline citations [1], [2], etc.
+
 ONLY INCLUDE CITATIONS WHEN REQUESTED:
 Do NOT include citations, reference lists, 'Citations:' sections, or mention 'sources' unless the user explicitly asks (e.g., says citations/sources/credible/reference). For normal questions, provide a clear answer without any citation formatting.
 
 ${sources.length ? `CITATION REQUIREMENTS (active because sources were provided or requested):
-You have access to relevant web sources. Follow these citation guidelines:
+You have access to relevant web sources and CAN provide real citations. Follow these citation guidelines:
 
 1. SYNTHESIZE INFORMATION: Don't just list sources. Explain your answer by synthesizing information from multiple references in a reasoned way.
 
@@ -540,6 +585,8 @@ You have access to relevant web sources. Follow these citation guidelines:
 6. STRUCTURE: Begin with a clear answer summary, followed by detailed reasoning with inline citations. Format: "This is supported by [1] which shows..." or "According to [2], the evidence suggests..."
 
 Available sources will be provided in the RELEVANT SOURCES section below.
+
+IMPORTANT: When sources are provided, you MUST use them. Do not say you cannot provide citations - you have real sources available. Reference them with [1], [2], etc. and explain what each source contributes to your answer.
 
 EXAMPLE FORMAT:
 "The EU AI Act [1] represents a landmark regulatory approach, while the OECD framework [2] provides international guidance. This combination [1,2] shows how different jurisdictions are approaching AI governance."
@@ -566,13 +613,16 @@ STRICT BEHAVIOR RULES:
 6. Be consistent with your personality traits
 7. Do NOT include citations or any 'Citations:' or 'Sources:' sections unless the user explicitly asks for citations/sources/credible references.
 
+CITATION CAPABILITIES:
+You have the ability to search the web and provide real citations when requested. When sources are provided below, you CAN and SHOULD use them to support your answers with inline citations [1], [2], etc.
+
 CONVERSATION CONTEXT:
 ${conversationContext}
 
 ${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 
 ${sources.length ? `CITATION REQUIREMENTS (active because sources were provided or requested):
-You have access to relevant web sources. Follow these citation guidelines:
+You have access to relevant web sources and CAN provide real citations. Follow these citation guidelines:
 
 1. SYNTHESIZE INFORMATION: Don't just list sources. Explain your answer by synthesizing information from multiple references in a reasoned way.
 
@@ -587,6 +637,8 @@ You have access to relevant web sources. Follow these citation guidelines:
 6. STRUCTURE: Begin with a clear answer summary, followed by detailed reasoning with inline citations. Format: "This is supported by [1] which shows..." or "According to [2], the evidence suggests..."
 
 Available sources will be provided in the RELEVANT SOURCES section below.
+
+IMPORTANT: When sources are provided, you MUST use them. Do not say you cannot provide citations - you have real sources available. Reference them with [1], [2], etc. and explain what each source contributes to your answer.
 
 EXAMPLE FORMAT:
 "The EU AI Act [1] represents a landmark regulatory approach, while the OECD framework [2] provides international guidance. This combination [1,2] shows how different jurisdictions are approaching AI governance."

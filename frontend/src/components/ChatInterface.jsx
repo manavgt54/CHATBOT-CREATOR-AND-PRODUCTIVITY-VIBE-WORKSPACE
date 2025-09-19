@@ -419,6 +419,8 @@ function ChatInterface({ ai, onClose, sessionId }) {
   const messagesEndRef = useRef(null);
   const [apiKey, setApiKey] = useState('');
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     // Add welcome message
@@ -514,6 +516,68 @@ function ChatInterface({ ai, onClose, sessionId }) {
     }
   };
 
+  const handleFileUpload = async (files) => {
+    if (!files.length) return;
+    setIsUploading(true);
+    
+    const newFiles = [];
+    for (const file of files) {
+      try {
+        const resp = await apiService.ingestFile(sessionId, ai.containerId, file);
+        if (resp.success) {
+          newFiles.push({
+            id: Date.now() + Math.random(),
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            chunks: resp.ingestedChunks || 0,
+            status: 'uploaded'
+          });
+        } else {
+          newFiles.push({
+            id: Date.now() + Math.random(),
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            status: 'error',
+            error: resp.message || 'Upload failed'
+          });
+        }
+      } catch (err) {
+        newFiles.push({
+          id: Date.now() + Math.random(),
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          status: 'error',
+          error: 'Upload failed'
+        });
+      }
+    }
+    
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    setIsUploading(false);
+  };
+
+  const removeFile = (fileId) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  const getFileIcon = (type) => {
+    if (type.includes('pdf')) return '📄';
+    if (type.includes('image')) return '🖼️';
+    if (type.includes('text')) return '📝';
+    return '📎';
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   return (
     <ChatContainer onClick={onClose}>
       <ChatWindow onClick={(e) => e.stopPropagation()}>
@@ -570,9 +634,80 @@ function ChatInterface({ ai, onClose, sessionId }) {
           <div ref={messagesEndRef} />
         </MessagesContainer>
         
+        {/* File Preview Section */}
+        {uploadedFiles.length > 0 && (
+          <div style={{ 
+            padding: '10px 20px', 
+            borderTop: '1px solid #eee',
+            backgroundColor: '#f8f9fa',
+            maxHeight: '120px',
+            overflowY: 'auto'
+          }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: '600', marginBottom: '8px', color: '#666' }}>
+              📁 Uploaded Files ({uploadedFiles.length})
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {uploadedFiles.map((file) => (
+                <div key={file.id} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 10px',
+                  backgroundColor: file.status === 'error' ? '#fee' : '#e8f5e8',
+                  border: `1px solid ${file.status === 'error' ? '#fcc' : '#c8e6c8'}`,
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  maxWidth: '200px'
+                }}>
+                  <span>{getFileIcon(file.type)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ 
+                      fontWeight: '500', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis', 
+                      whiteSpace: 'nowrap' 
+                    }}>
+                      {file.name}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#666' }}>
+                      {file.status === 'uploaded' 
+                        ? `${formatFileSize(file.size)} • ${file.chunks} sections`
+                        : file.error
+                      }
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeFile(file.id)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#999',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      fontSize: '0.9rem'
+                    }}
+                    title="Remove file"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <InputContainer>
-          <label htmlFor="doc-upload" style={{ alignSelf: 'center', cursor: 'pointer' }} title="Upload PDF/Image/Text">
-            📎
+          <label 
+            htmlFor="doc-upload" 
+            style={{ 
+              alignSelf: 'center', 
+              cursor: 'pointer',
+              opacity: isUploading ? 0.5 : 1,
+              pointerEvents: isUploading ? 'none' : 'auto'
+            }} 
+            title="Upload PDF/Image/Text"
+          >
+            {isUploading ? '⏳' : '📎'}
           </label>
           <input
             id="doc-upload"
@@ -580,20 +715,12 @@ function ChatInterface({ ai, onClose, sessionId }) {
             accept=".pdf,.txt,image/*"
             multiple
             style={{ display: 'none' }}
-            onChange={async (e) => {
+            onChange={(e) => {
               const files = Array.from(e.target.files || []);
-              if (!files.length) return;
-              for (const file of files) {
-                try {
-                  const resp = await apiService.ingestFile(sessionId, ai.containerId, file);
-                  if (!resp.success) alert(`${file.name}: ${resp.message || 'Failed to ingest file'}`);
-                  else alert(`Ingested ${resp.ingestedChunks} chunks from ${file.name}`);
-                } catch (err) {
-                  alert(`${file.name}: Failed to upload file.`);
-                }
-              }
+              handleFileUpload(files);
               e.target.value = '';
             }}
+            disabled={isUploading}
           />
           <MessageInput
             type="text"

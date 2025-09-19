@@ -2,8 +2,16 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 class AIInstructionGenerator {
     constructor() {
-        this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyCsTK0nmsF_Kl5lXgDmJCkWPWFSPDzO4lU');
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        // Use dedicated API key for description generation
+        const apiKey = process.env.GOOGLE_DESCRIPTION_API_KEY || 'AIzaSyCxtQVXb1MtoTB795RkwCE_whmfl2sAZdw';
+        this.genAI = new GoogleGenerativeAI(apiKey);
+        this.model = this.genAI.getGenerativeModel({ 
+            model: 'gemini-1.5-flash',
+            generationConfig: {
+                maxOutputTokens: 2000,
+                temperature: 0.8
+            }
+        });
     }
 
     /**
@@ -15,7 +23,7 @@ class AIInstructionGenerator {
      */
     async generateDetailedInstructions(aiName, description, personality = 'friendly') {
         try {
-            console.log(`🎯 Generating instructions for ${aiName}...`);
+            console.log(`🎯 Generating instructions for ${aiName} using DESCRIPTION API...`);
 
             const prompt = `
 You are an expert AI personality designer. Create detailed, specific instructions for an AI chatbot that will make it behave exactly as the user wants.

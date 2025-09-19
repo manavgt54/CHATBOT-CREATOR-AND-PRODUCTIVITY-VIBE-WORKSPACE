@@ -233,6 +233,7 @@ class ContainerManager {
         capabilities: this.generateCapabilities(aiDescription),
         apiKeys: this.aiApiKeys,
         cloudCredentials: this.cloudCredentials,
+        domain: { keywords: this.deriveDomainKeywords(aiName, aiDescription) },
         detailedInstructions: detailedInstructions,
         systemPrompt: systemPrompt,
         createdAt: new Date().toISOString()
@@ -250,6 +251,39 @@ class ContainerManager {
       console.error(`❌ Failed to inject AI logic for ${containerId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Derive domain keywords based on AI name/description for strict scope enforcement
+   */
+  deriveDomainKeywords(aiName, aiDescription) {
+    const text = `${aiName} ${aiDescription}`.toLowerCase();
+    const unique = (arr) => Array.from(new Set(arr));
+    // K-Pop / entertainment
+    if (/(k-pop|kpop|idol|fandom|stan|comeback|lightstick|mv|kdrama|k-drama|music)/i.test(text)) {
+      return unique(['k-pop','kpop','music','idol','comeback','mv','lyrics','fandom','bias','group','dance','choreo','lightstick','fan meeting']);
+    }
+    // Academic / research
+    if (/(academic|research|peer[- ]?reviewed|paper|journal|scholar|university)/i.test(text)) {
+      return unique(['research','paper','journal','study','methodology','citation','peer reviewed','literature','academic']);
+    }
+    // Technical / developer
+    if (/(developer|engineer|programmer|technical|software|api|code|debug)/i.test(text)) {
+      return unique(['code','programming','software','api','debug','architecture','design patterns']);
+    }
+    // Business / corporate
+    if (/(business|marketing|sales|corporate|strategy|finance|operations|market)/i.test(text)) {
+      return unique(['market','strategy','sales','pricing','finance','operations']);
+    }
+    // Fitness / gym
+    if (/(fitness|gym|coach|trainer|workout|nutrition|supplement)/i.test(text)) {
+      return unique(['workout','nutrition','supplements','gear','exercises','programs']);
+    }
+    // Customer support
+    if (/(customer|support|helpdesk|service|billing|account)/i.test(text)) {
+      return unique(['support','customer','billing','account','orders','refunds','delivery','technical support']);
+    }
+    return [];
   }
 
   /**

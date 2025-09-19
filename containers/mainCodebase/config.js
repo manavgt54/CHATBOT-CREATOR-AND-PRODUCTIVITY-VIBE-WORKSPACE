@@ -46,6 +46,12 @@ const config = {
     maxTokens: 1000,
     temperature: 0.7
   },
+  google_description: {
+    apiKey: process.env.GOOGLE_DESCRIPTION_API_KEY || 'AIzaSyCxtQVXb1MtoTB795RkwCE_whmfl2sAZdw',
+    model: 'gemini-1.5-flash',
+    maxTokens: 2000,
+    temperature: 0.8
+  },
     // Optional web search providers for citations augmentation
     search: {
       // provider: 'google_cse' | 'brave' | 'serpapi' | 'none'
@@ -131,18 +137,18 @@ const config = {
   features: {
     enableWebCitations: (process.env.ENABLE_WEB_CITATIONS || 'true') === 'true',
     ingestFetchedSources: (process.env.INGEST_FETCHED_SOURCES || 'true') === 'true',
-    minVectorsForRagQuery: parseInt(process.env.MIN_VECTORS_FOR_RAG_QUERY || '4', 10),
-    maxSourcesPerFetch: parseInt(process.env.MAX_SOURCES_PER_FETCH || '3', 10),
+    minVectorsForRagQuery: parseInt(process.env.MIN_VECTORS_FOR_RAG_QUERY || '3', 10),
+    maxSourcesPerFetch: parseInt(process.env.MAX_SOURCES_PER_FETCH || '10', 10),
     // Dynamic citation policy controls
     citationMode: process.env.CITATION_MODE || 'explicit', // 'explicit' | 'auto_on_keywords' | 'always'
     webAugPolicy: process.env.WEB_AUG_POLICY || 'balanced', // 'prefer_internal' | 'balanced' | 'prefer_web'
-    minConfidenceForWeb: parseFloat(process.env.MIN_CONF_FOR_WEB || '0.55'), // average top-k similarity
+    minConfidenceForWeb: parseFloat(process.env.MIN_CONF_FOR_WEB || '0.45'), // Lower threshold for better web search
     credibilityThreshold: process.env.CREDIBILITY_THRESHOLD || 'General Web', // 'Government/Agency'|'Intergovernmental Agency'|'Academic'|'Peer-reviewed'|'News/Media'|'General Web'
-    maxWebCallsPerTurn: parseInt(process.env.MAX_WEB_CALLS_PER_TURN || '1', 10),
+    maxWebCallsPerTurn: parseInt(process.env.MAX_WEB_CALLS_PER_TURN || '3', 10),
     maxTotalSources: parseInt(process.env.MAX_TOTAL_SOURCES || '5', 10),
     cacheTtlMs: parseInt(process.env.WEB_CACHE_TTL_MS || '300000', 10),
     renderStyle: process.env.CITATION_RENDER_STYLE || 'numeric', // 'numeric'|'title'|'footnote'
-    preferInternalOverWeb: (process.env.PREFER_INTERNAL_OVER_WEB || 'true') === 'true',
+    preferInternalOverWeb: (process.env.PREFER_INTERNAL_OVER_WEB || 'false') === 'true',
     enableConversationHistory: true,
     enableMemoryManagement: true,
     enableCapabilityDetection: true,
