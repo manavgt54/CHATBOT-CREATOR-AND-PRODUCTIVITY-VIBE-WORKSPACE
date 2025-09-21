@@ -2,10 +2,15 @@ AI Creation Platform – Hackathon Prototype
 Multi-bot AI Platform with Augmentation, RAG, and Personality-aware Bots
 Hackathon: Google Gen AI International Hackathon
 manavgt54– Team Lead, Core Development, Architecture & Optimization, 
+
 VAIBHAV WAGHALKAR– Assisted with testing, UI design, and some core devlopment
+
 THANUSHREE-23(GITHUB)– Supported workflow, demo prep, and documentation,UI DESING
+
 VANI412(GITHUB)– Assisted with presentation, project visuals, and flow diagrams,ui desings and implementations.
+
 Date: September 21, 2025
+
 
 Table of Contents
 Project Overview
