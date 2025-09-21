@@ -13,8 +13,8 @@ class RAGManager {
     this.indexPath = path.join(this.dbDir, 'index.json');
     this.googleApiKey = options.apiKey || process.env.GOOGLE_AI_API_KEY;
     this.embeddingModel = 'text-embedding-004';
-    this.maxChunkChars = options.maxChunkChars || 800; // ~512-800 chars per chunk
-    this.minChunkChars = 200;
+    this.maxChunkChars = options.maxChunkChars || 2000; // ~2000 chars per chunk (larger chunks)
+    this.minChunkChars = 500; // Minimum 500 chars per chunk
     this.topKDefault = 5;
     this.embeddingCache = new Map(); // Cache embeddings to avoid duplicate API calls
     this.webCache = new Map(); // Cache web search results by query
@@ -679,12 +679,297 @@ class RAGManager {
   }
 
   /**
+   * On-demand processing: Process document chunks only when user asks questions
+   * This is much more efficient than processing everything upfront
+   */
+  async queryWithOnDemandProcessing(queryText, topK = this.topKDefault) {
+    console.log(`🔍 On-demand processing for query: "${queryText.substring(0, 50)}..."`);
+    
+    // First, try to find relevant chunks from already processed documents
+    const existingResults = await this.query(queryText, topK);
+    
+    // If we have enough results, return them
+    if (existingResults.length >= topK) {
+      console.log(`✅ Found ${existingResults.length} existing results`);
+      return existingResults;
+    }
+    
+    // If not enough results, process more chunks on-demand
+    console.log(`🔄 Processing more chunks on-demand (found ${existingResults.length}/${topK})`);
+    
+    // Get unprocessed chunks from document store
+    const unprocessedChunks = this._getUnprocessedChunks(queryText);
+    
+    if (unprocessedChunks.length === 0) {
+      console.log(`📝 No unprocessed chunks found`);
+      return existingResults;
+    }
+    
+    // Process only the most relevant unprocessed chunks
+    const chunksToProcess = unprocessedChunks.slice(0, Math.min(10, topK - existingResults.length));
+    console.log(`🔄 Processing ${chunksToProcess.length} chunks on-demand`);
+    
+    for (const chunk of chunksToProcess) {
+      try {
+        await this.ingestText(chunk.text, chunk.metadata);
+        console.log(`✅ Processed chunk: ${chunk.text.substring(0, 50)}...`);
+      } catch (error) {
+        console.error(`❌ Failed to process chunk:`, error.message);
+      }
+    }
+    
+    // Now query again with the newly processed chunks
+    const finalResults = await this.query(queryText, topK);
+    console.log(`✅ On-demand processing complete: ${finalResults.length} results`);
+    
+    return finalResults;
+  }
+
+  /**
+   * Smart chunk extraction: Analyze user query and extract only relevant chunks
+   */
+  async smartChunkExtraction(queryText, documentStore) {
+    console.log(`🧠 Smart chunk extraction for query: "${queryText.substring(0, 50)}..."`);
+    
+    try {
+      // 1. Analyze the query to understand what the user needs
+      const queryAnalysis = await this._analyzeQuery(queryText);
+      console.log(`📊 Query analysis:`, queryAnalysis);
+      
+      // 2. Get all available documents from the store
+      const documents = documentStore.getAllDocuments();
+      console.log(`📚 Found ${documents.length} documents`);
+      
+      // 3. For each document, extract only relevant chunks
+      const relevantChunks = [];
+      
+      for (const doc of documents) {
+        const docChunks = await this._extractRelevantChunksFromDocument(doc, queryAnalysis);
+        relevantChunks.push(...docChunks);
+      }
+      
+      console.log(`🎯 Extracted ${relevantChunks.length} relevant chunks`);
+      
+      // 4. Process only the most relevant chunks (limit to avoid too many API calls)
+      const chunksToProcess = relevantChunks.slice(0, 10); // Max 10 chunks per query
+      console.log(`🔄 Processing ${chunksToProcess.length} chunks`);
+      
+      // 5. Process chunks and add to RAG
+      for (const chunk of chunksToProcess) {
+        try {
+          await this.ingestText(chunk.text, chunk.metadata);
+          console.log(`✅ Processed relevant chunk: ${chunk.text.substring(0, 50)}...`);
+        } catch (error) {
+          console.error(`❌ Failed to process chunk:`, error.message);
+        }
+      }
+      
+      return chunksToProcess;
+      
+    } catch (error) {
+      console.error(`❌ Smart chunk extraction failed:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Analyze user query to understand what they're looking for
+   */
+  async _analyzeQuery(queryText) {
+    // Extract key terms, concepts, and intent from the query
+    const analysis = {
+      keywords: [],
+      concepts: [],
+      intent: 'general',
+      documentTypes: [],
+      timeframes: [],
+      entities: []
+    };
+    
+    // Extract keywords (simple approach - can be enhanced with NLP)
+    const words = queryText.toLowerCase().split(/\s+/);
+    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'what', 'when', 'where', 'why', 'how', 'who', 'which', 'this', 'that', 'these', 'those']);
+    
+    analysis.keywords = words.filter(word => 
+      word.length > 2 && 
+      !stopWords.has(word) && 
+      !/^\d+$/.test(word) // Not just numbers
+    );
+    
+    // Detect intent
+    if (/\b(what|explain|describe|tell me about)\b/i.test(queryText)) {
+      analysis.intent = 'explanation';
+    } else if (/\b(how|steps|process|procedure)\b/i.test(queryText)) {
+      analysis.intent = 'process';
+    } else if (/\b(when|date|time|year|month)\b/i.test(queryText)) {
+      analysis.intent = 'temporal';
+    } else if (/\b(who|person|people|individual)\b/i.test(queryText)) {
+      analysis.intent = 'person';
+    } else if (/\b(where|location|place|address)\b/i.test(queryText)) {
+      analysis.intent = 'location';
+    } else if (/\b(why|reason|cause|because)\b/i.test(queryText)) {
+      analysis.intent = 'reasoning';
+    }
+    
+    // Detect document types
+    if (/\b(contract|agreement|license|terms)\b/i.test(queryText)) {
+      analysis.documentTypes.push('legal');
+    }
+    if (/\b(tax|income|return|filing|irs)\b/i.test(queryText)) {
+      analysis.documentTypes.push('tax');
+    }
+    if (/\b(invoice|bill|payment|amount|cost|price)\b/i.test(queryText)) {
+      analysis.documentTypes.push('financial');
+    }
+    if (/\b(medical|health|doctor|patient|treatment)\b/i.test(queryText)) {
+      analysis.documentTypes.push('medical');
+    }
+    
+    // Extract entities (simple regex-based)
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const phoneRegex = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
+    const dateRegex = /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g;
+    const amountRegex = /\$\d+(?:,\d{3})*(?:\.\d{2})?/g;
+    
+    analysis.entities = {
+      emails: queryText.match(emailRegex) || [],
+      phones: queryText.match(phoneRegex) || [],
+      dates: queryText.match(dateRegex) || [],
+      amounts: queryText.match(amountRegex) || []
+    };
+    
+    return analysis;
+  }
+
+  /**
+   * Extract relevant chunks from a document based on query analysis
+   */
+  async _extractRelevantChunksFromDocument(document, queryAnalysis) {
+    const relevantChunks = [];
+    
+    try {
+      // Get document chunks
+      const chunks = this._splitIntoChunks(document.text);
+      
+      for (const chunk of chunks) {
+        let relevanceScore = 0;
+        
+        // Score based on keyword matches
+        for (const keyword of queryAnalysis.keywords) {
+          const matches = (chunk.toLowerCase().match(new RegExp(keyword, 'g')) || []).length;
+          relevanceScore += matches * 2; // Weight keyword matches
+        }
+        
+        // Score based on document type relevance
+        if (queryAnalysis.documentTypes.length > 0) {
+          for (const docType of queryAnalysis.documentTypes) {
+            if (chunk.toLowerCase().includes(docType)) {
+              relevanceScore += 5;
+            }
+          }
+        }
+        
+        // Score based on entity matches
+        for (const entityType of Object.keys(queryAnalysis.entities)) {
+          for (const entity of queryAnalysis.entities[entityType]) {
+            if (chunk.includes(entity)) {
+              relevanceScore += 3;
+            }
+          }
+        }
+        
+        // Score based on intent
+        if (queryAnalysis.intent === 'temporal' && /\b\d{4}\b/.test(chunk)) {
+          relevanceScore += 2;
+        }
+        if (queryAnalysis.intent === 'person' && /\b[A-Z][a-z]+ [A-Z][a-z]+\b/.test(chunk)) {
+          relevanceScore += 2;
+        }
+        if (queryAnalysis.intent === 'location' && /\b[A-Z][a-z]+(?:, [A-Z]{2})?\b/.test(chunk)) {
+          relevanceScore += 2;
+        }
+        
+        // Only include chunks with some relevance
+        if (relevanceScore > 0) {
+          relevantChunks.push({
+            text: chunk,
+            score: relevanceScore,
+            metadata: {
+              role: 'document',
+              title: document.title,
+              docId: document.id,
+              tags: document.tags || [],
+              relevanceScore: relevanceScore
+            }
+          });
+        }
+      }
+      
+      // Sort by relevance score and return top chunks
+      relevantChunks.sort((a, b) => b.score - a.score);
+      return relevantChunks.slice(0, 5); // Max 5 chunks per document
+      
+    } catch (error) {
+      console.error(`❌ Error extracting chunks from document:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get unprocessed chunks that might be relevant to the query
+   */
+  _getUnprocessedChunks(queryText) {
+    // This would integrate with the document store to get unprocessed chunks
+    // For now, return empty array - this would be implemented based on your doc store
+    return [];
+  }
+
+  /**
    * Format retrieved chunks as a context block.
    */
   formatContext(chunks) {
     if (!chunks?.length) return '';
     const lines = chunks.map((c, i) => `[#${i + 1} | score=${c.score.toFixed(3)}] ${c.text}`);
     return `KNOWLEDGE CONTEXT (retrieved by similarity)\n${lines.join('\n')}`;
+  }
+
+  /**
+   * Clean up RAG data when documents are deleted
+   */
+  cleanupRAGData() {
+    try {
+      const index = this._readIndex();
+      index.vectors = [];
+      fs.writeFileSync(this.indexPath, JSON.stringify(index, null, 2), 'utf-8');
+      console.log('🧹 RAG data cleaned up');
+    } catch (error) {
+      console.error('❌ Error cleaning up RAG data:', error);
+    }
+  }
+
+  /**
+   * Clean up RAG data for a specific document
+   */
+  cleanupDocumentRAGData(documentTitle) {
+    try {
+      const index = this._readIndex();
+      const originalCount = index.vectors.length;
+      
+      // Filter out vectors that contain the document title in metadata
+      index.vectors = index.vectors.filter(vector => {
+        const metadata = vector.metadata || {};
+        const title = metadata.title || '';
+        return !title.includes(documentTitle) && !vector.text.includes(documentTitle);
+      });
+      
+      const removedCount = originalCount - index.vectors.length;
+      fs.writeFileSync(this.indexPath, JSON.stringify(index, null, 2), 'utf-8');
+      console.log(`🧹 RAG data cleaned up for document "${documentTitle}" - removed ${removedCount} vectors`);
+      return { success: true, removedCount };
+    } catch (error) {
+      console.error('❌ Error cleaning up document RAG data:', error);
+      return { success: false, error: error.message };
+    }
   }
 }
 

@@ -105,11 +105,14 @@ function LoginForm({ onLogin }) {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    name: ''
+    name: '',
+    otp: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({
@@ -119,6 +122,40 @@ function LoginForm({ onLogin }) {
     setError(''); // Clear error when user types
   };
 
+  const handleSendOTP = async () => {
+    if (!formData.email) {
+      setError('Please enter your email first');
+      return;
+    }
+
+    setOtpLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('https://chatbot-creator-and-productivity-vibe.onrender.com/api/auth/send-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: formData.email })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setOtpSent(true);
+        setError('');
+      } else {
+        setError(data.message || 'Failed to send OTP');
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+      console.error('Send OTP error:', err);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -126,14 +163,35 @@ function LoginForm({ onLogin }) {
 
     try {
       if (isRegistering) {
-        // Register new user
-        const response = await apiService.register(formData.email, formData.password, formData.name);
-        if (response.success) {
+        if (!otpSent) {
+          setError('Please send OTP first');
+          setLoading(false);
+          return;
+        }
+
+        // Verify OTP and register
+        const response = await fetch('https://chatbot-creator-and-productivity-vibe.onrender.com/api/auth/verify-otp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: formData.email,
+            otp: formData.otp,
+            password: formData.password,
+            name: formData.name
+          })
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
           setError('Registration successful! Please login with your credentials.');
           setIsRegistering(false);
-          setFormData({ email: '', password: '', name: '' });
+          setOtpSent(false);
+          setFormData({ email: '', password: '', name: '', otp: '' });
         } else {
-          setError(response.message || 'Registration failed');
+          setError(data.message || 'Registration failed');
         }
       } else {
         // Login existing user
@@ -174,15 +232,42 @@ function LoginForm({ onLogin }) {
           
           <InputGroup>
             <Label htmlFor="email">Email</Label>
-            <Input
-              type="email"
-              id="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              placeholder="Enter your email"
-            />
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'stretch' }}>
+              <Input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                required
+                placeholder="Enter your email"
+                style={{ flex: 1 }}
+              />
+              {isRegistering && (
+                <Button
+                  type="button"
+                  onClick={handleSendOTP}
+                  disabled={otpLoading || !formData.email}
+                  style={{ 
+                    background: otpSent ? '#27ae60' : '#667eea',
+                    color: 'white',
+                    padding: '12px 16px',
+                    fontSize: '0.9rem',
+                    minWidth: '120px',
+                    border: '2px solid #fff',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    zIndex: 1000,
+                    position: 'relative',
+                    height: '48px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {otpLoading ? <LoadingSpinner /> : (otpSent ? '✓ Sent' : 'Send OTP')}
+                </Button>
+              )}
+            </div>
           </InputGroup>
           
           <InputGroup>
@@ -197,6 +282,36 @@ function LoginForm({ onLogin }) {
               placeholder="Enter your password"
             />
           </InputGroup>
+
+          {isRegistering && otpSent && (
+            <InputGroup>
+              <Label htmlFor="otp">Verification Code (6 digits)</Label>
+              <Input
+                type="text"
+                id="otp"
+                name="otp"
+                value={formData.otp}
+                onChange={handleChange}
+                required
+                placeholder="Enter 6-digit OTP"
+                maxLength="6"
+                style={{ 
+                  textAlign: 'center',
+                  fontSize: '1.2rem',
+                  letterSpacing: '2px',
+                  fontFamily: 'monospace'
+                }}
+              />
+              <div style={{ 
+                fontSize: '0.8rem', 
+                color: '#666', 
+                textAlign: 'center',
+                marginTop: '5px'
+              }}>
+                Check your email for the verification code
+              </div>
+            </InputGroup>
+          )}
           
           <Button type="submit" disabled={loading}>
             {loading ? <LoadingSpinner /> : (isRegistering ? 'Register' : 'Login')}
@@ -207,7 +322,8 @@ function LoginForm({ onLogin }) {
             onClick={() => {
               setIsRegistering(!isRegistering);
               setError('');
-              setFormData({ email: '', password: '', name: '' });
+              setOtpSent(false);
+              setFormData({ email: '', password: '', name: '', otp: '' });
             }}
             style={{ 
               background: 'transparent', 

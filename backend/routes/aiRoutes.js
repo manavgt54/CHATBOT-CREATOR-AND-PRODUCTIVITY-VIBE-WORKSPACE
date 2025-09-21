@@ -1,11 +1,68 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { sessionManager } = require('../services/sessionManager');
 const { containerManager } = require('../services/containerManager');
 const { aiService } = require('../services/aiService');
 
 const router = express.Router();
 const multer = require('multer');
-const upload = multer();
+const upload = multer({
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+    fieldSize: 10 * 1024 * 1024, // 10MB limit for fields
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow PDF, images, and text files
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/bmp',
+      'image/tiff',
+      'text/plain',
+      'text/csv',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype) || file.originalname.match(/\.(pdf|jpg|jpeg|png|gif|bmp|tiff|txt|csv|doc|docx)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not supported'), false);
+    }
+  }
+});
+
+// Multi-file upload for document comparison
+const uploadMultiple = multer({
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit per file
+    fieldSize: 10 * 1024 * 1024, // 10MB limit for fields
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow PDF, images, and text files
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/bmp',
+      'image/tiff',
+      'text/plain',
+      'text/csv',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype) || file.originalname.match(/\.(pdf|jpg|jpeg|png|gif|bmp|tiff|txt|csv|doc|docx)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not supported'), false);
+    }
+  }
+});
 
 // Middleware to validate session for all AI routes
 const validateSession = async (req, res, next) => {
@@ -44,14 +101,13 @@ const validateSession = async (req, res, next) => {
   }
 };
 
-// Apply session validation to all routes
-router.use(validateSession);
+// Session validation will be applied to individual routes that need it
 
 /**
  * POST /api/create_ai
  * Create a new AI chatbot instance
  */
-router.post('/create_ai', async (req, res) => {
+router.post('/create_ai', validateSession, async (req, res) => {
   try {
     const { name, description } = req.body;
     const { sessionId, userId } = req;
@@ -138,7 +194,7 @@ router.post('/create_ai', async (req, res) => {
  * GET /api/get_ai_list
  * Get all AI instances for the current session
  */
-router.get('/get_ai_list', async (req, res) => {
+router.get('/get_ai_list', validateSession, async (req, res) => {
   try {
     const { userId } = req;
 
@@ -169,7 +225,7 @@ router.get('/get_ai_list', async (req, res) => {
  * POST /api/interact_ai
  * Send message to AI chatbot and get response
  */
-router.post('/interact_ai', async (req, res) => {
+router.post('/interact_ai', validateSession, async (req, res) => {
   try {
     const { containerId, message } = req.body;
     const { sessionId, userId } = req;
@@ -237,7 +293,7 @@ router.post('/interact_ai', async (req, res) => {
  * POST /api/ingest_text
  * Ingest user-provided text into an AI container (doc store + RAG)
  */
-router.post('/ingest_text', async (req, res) => {
+router.post('/ingest_text', validateSession, async (req, res) => {
   try {
     const { containerId, title, text, tags } = req.body;
     const { sessionId, userId } = req;
@@ -260,23 +316,52 @@ router.post('/ingest_text', async (req, res) => {
  * POST /api/ingest_file
  * Multipart file upload to ingest into container (PDF/Image/Text)
  */
-router.post('/ingest_file', upload.single('file'), async (req, res) => {
+router.post('/ingest_file', validateSession, upload.single('file'), async (req, res) => {
   try {
     const { containerId } = req.body;
     const file = req.file;
     const { sessionId, userId } = req;
+    
+    console.log('📤 File upload request:', {
+      containerId,
+      fileName: file?.originalname,
+      fileSize: file?.size,
+      mimeType: file?.mimetype,
+      sessionId: sessionId?.substring(0, 8) + '...'
+    });
+    
     if (!containerId || !file) {
       return res.status(400).json({ success: false, message: 'containerId and file are required' });
     }
+    
+    // Check file size
+    if (file.size > 50 * 1024 * 1024) {
+      return res.status(413).json({ success: false, message: 'File too large. Maximum size is 50MB.' });
+    }
+    
     const aiInstance = await aiService.getAIInstance(containerId);
     if (!aiInstance || aiInstance.user_id !== userId) {
       return res.status(403).json({ success: false, message: 'AI instance not found or access denied' });
     }
+    
+    console.log('🔄 Processing file:', file.originalname);
     const result = await containerManager.ingestFileIntoContainer(containerId, file.originalname, file.mimetype, file.buffer, sessionId);
+    console.log('✅ File processed successfully:', result);
+    
     return res.json(result);
   } catch (error) {
-    console.error('Ingest file error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to ingest file' });
+    console.error('❌ Ingest file error:', error);
+    
+    // Handle specific error types
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ success: false, message: 'File too large. Maximum size is 50MB.' });
+    } else if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ success: false, message: 'Unexpected file field.' });
+    } else if (error.message === 'File type not supported') {
+      return res.status(415).json({ success: false, message: 'File type not supported. Please upload PDF, image, or text files.' });
+    }
+    
+    return res.status(500).json({ success: false, message: 'Failed to ingest file: ' + error.message });
   }
 });
 
@@ -284,14 +369,14 @@ router.post('/ingest_file', upload.single('file'), async (req, res) => {
  * GET /api/get_ai_status/:containerId
  * Get status of specific AI instance
  */
-router.get('/get_ai_status/:containerId', async (req, res) => {
+router.get('/get_ai_status/:containerId', validateSession, async (req, res) => {
   try {
     const { containerId } = req.params;
     const { userId } = req;
 
     // Verify AI instance belongs to user
     const aiInstance = await aiService.getAIInstance(containerId);
-    if (!aiInstance || aiInstance.userId !== userId) {
+    if (!aiInstance || aiInstance.user_id !== userId) {
       return res.status(403).json({
         success: false,
         message: 'AI instance not found or access denied'
@@ -315,10 +400,159 @@ router.get('/get_ai_status/:containerId', async (req, res) => {
 });
 
 /**
+ * DELETE /api/delete_document
+ * Delete a specific document from an AI instance
+ */
+router.delete('/delete_document', validateSession, async (req, res) => {
+  try {
+    const { containerId, documentId } = req.body;
+    const { userId } = req;
+
+    // Validate input
+    if (!containerId || !documentId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Container ID and Document ID are required'
+      });
+    }
+
+    // Check if AI exists and belongs to user
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(404).json({
+        success: false,
+        message: 'AI instance not found or access denied'
+      });
+    }
+
+    console.log(`Deleting document ${documentId} from AI instance ${containerId}`);
+
+    // Get the AI container path
+    const containerPath = path.join(__dirname, '../containers', containerId);
+    
+    if (!fs.existsSync(containerPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'AI container not found'
+      });
+    }
+
+    // Load the AI instance
+    const { DocStore } = require(path.join(containerPath, 'docStore.js'));
+    const { RAGManager } = require(path.join(containerPath, 'rag.js'));
+    
+    const docStore = new DocStore(containerPath);
+    const rag = new RAGManager(containerPath);
+
+    // Get document info before deletion
+    const document = docStore.getDocumentById(documentId);
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    // Delete document from docStore
+    const deleteResult = docStore.deleteDocument(documentId);
+    
+    if (deleteResult.success) {
+      // Clean up RAG data for this specific document
+      const ragCleanupResult = rag.cleanupDocumentRAGData(document.title);
+      
+      res.json({
+        success: true,
+        message: 'Document deleted successfully',
+        document: deleteResult.doc,
+        ragCleanup: ragCleanupResult
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: deleteResult.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Delete document error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during document deletion'
+    });
+  }
+});
+
+/**
+ * DELETE /api/clear_all_documents
+ * Clear all documents from an AI instance
+ */
+router.delete('/clear_all_documents', validateSession, async (req, res) => {
+  try {
+    const { containerId } = req.body;
+    const { userId } = req;
+
+    // Validate input
+    if (!containerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Container ID is required'
+      });
+    }
+
+    // Check if AI exists and belongs to user
+    const aiInstance = await aiService.getAIInstance(containerId);
+    if (!aiInstance || aiInstance.user_id !== userId) {
+      return res.status(404).json({
+        success: false,
+        message: 'AI instance not found or access denied'
+      });
+    }
+
+    console.log(`Clearing all documents from AI instance ${containerId}`);
+
+    // Get the AI container path
+    const containerPath = path.join(__dirname, '../containers', containerId);
+    
+    if (!fs.existsSync(containerPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'AI container not found'
+      });
+    }
+
+    // Load the AI instance
+    const { DocStore } = require(path.join(containerPath, 'docStore.js'));
+    const { RAGManager } = require(path.join(containerPath, 'rag.js'));
+    
+    const docStore = new DocStore(containerPath);
+    const rag = new RAGManager(containerPath);
+
+    // Clear all documents
+    const clearResult = docStore.clearAllDocuments();
+    
+    // Clean up all RAG data
+    rag.cleanupRAGData();
+    
+    res.json({
+      success: true,
+      message: 'All documents cleared successfully',
+      deletedCount: clearResult.deletedCount
+    });
+
+  } catch (error) {
+    console.error('Clear documents error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during document clearing'
+    });
+  }
+});
+
+/**
  * DELETE /api/delete_ai
  * Delete an AI chatbot instance
  */
-router.delete('/delete_ai', async (req, res) => {
+router.delete('/delete_ai', validateSession, async (req, res) => {
   try {
     const { containerId } = req.body;
     const { userId } = req;
@@ -333,7 +567,7 @@ router.delete('/delete_ai', async (req, res) => {
 
     // Verify AI instance belongs to user
     const aiInstance = await aiService.getAIInstance(containerId);
-    if (!aiInstance || aiInstance.userId !== userId) {
+    if (!aiInstance || aiInstance.user_id !== userId) {
       return res.status(403).json({
         success: false,
         message: 'AI instance not found or access denied'
@@ -367,7 +601,7 @@ module.exports = router;
 /**
  * Authenticated routes for managing per-AI API keys
  */
-router.post('/generate_api_key', async (req, res) => {
+router.post('/generate_api_key', validateSession, async (req, res) => {
   try {
     const { containerId, label } = req.body;
     const { userId } = req;
@@ -389,7 +623,7 @@ router.post('/generate_api_key', async (req, res) => {
   }
 });
 
-router.get('/list_api_keys/:containerId', async (req, res) => {
+router.get('/list_api_keys/:containerId', validateSession, async (req, res) => {
   try {
     const { containerId } = req.params;
     const { userId } = req;
@@ -407,7 +641,7 @@ router.get('/list_api_keys/:containerId', async (req, res) => {
   }
 });
 
-router.post('/revoke_api_key', async (req, res) => {
+router.post('/revoke_api_key', validateSession, async (req, res) => {
   try {
     const { keyId } = req.body;
     const { userId } = req;

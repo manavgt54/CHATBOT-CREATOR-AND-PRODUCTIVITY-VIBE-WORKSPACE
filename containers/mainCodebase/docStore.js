@@ -34,6 +34,7 @@ class DocStore {
     const doc = {
       id,
       title: title || `Document ${db.documents.length + 1}`,
+      text: text, // Store full text for smart extraction
       tags,
       createdAt: new Date().toISOString(),
       chunkCount: chunks.length,
@@ -46,6 +47,41 @@ class DocStore {
   listDocuments() {
     const db = this._read();
     return db.documents || [];
+  }
+
+  getAllDocuments() {
+    const db = this._read();
+    return db.documents || [];
+  }
+
+  getDocumentById(id) {
+    const db = this._read();
+    return db.documents.find(doc => doc.id === id) || null;
+  }
+
+  getDocumentText(id) {
+    const doc = this.getDocumentById(id);
+    return doc ? doc.text : null;
+  }
+
+  deleteDocument(id) {
+    const db = this._read();
+    const docIndex = db.documents.findIndex(doc => doc.id === id);
+    if (docIndex === -1) {
+      return { success: false, message: 'Document not found' };
+    }
+    
+    const deletedDoc = db.documents.splice(docIndex, 1)[0];
+    this._write(db);
+    return { success: true, doc: deletedDoc };
+  }
+
+  clearAllDocuments() {
+    const db = this._read();
+    const count = db.documents.length;
+    db.documents = [];
+    this._write(db);
+    return { success: true, deletedCount: count };
   }
 
   _chunk(text) {

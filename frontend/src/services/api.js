@@ -1,12 +1,12 @@
 import axios from 'axios';
 
 // Base URL for API calls - can be configured for different environments
-const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://chatbot-creator-and-productivity-vibe.onrender.com/api';
 
 // Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // 30 seconds timeout for AI operations
+  timeout: 120000, // 2 minutes timeout for file uploads and AI operations
   headers: {
     'Content-Type': 'application/json',
   },
@@ -96,6 +96,50 @@ export const apiService = {
       return {
         success: false,
         message: error.message || 'Registration failed',
+      };
+    }
+  },
+
+  /**
+   * Send OTP to email for registration
+   * @param {string} email - User email
+   * @returns {Promise<Object>} - Response with success status or error
+   */
+  async sendOTP(email) {
+    try {
+      const response = await apiClient.post('/auth/send-otp', {
+        email,
+      });
+      return response;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to send OTP',
+      };
+    }
+  },
+
+  /**
+   * Verify OTP and complete registration
+   * @param {string} email - User email
+   * @param {string} otp - 6-digit OTP
+   * @param {string} password - User password
+   * @param {string} name - User name
+   * @returns {Promise<Object>} - Response with success status or error
+   */
+  async verifyOTP(email, otp, password, name) {
+    try {
+      const response = await apiClient.post('/auth/verify-otp', {
+        email,
+        otp,
+        password,
+        name,
+      });
+      return response;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'OTP verification failed',
       };
     }
   },
@@ -202,11 +246,66 @@ export const apiService = {
       form.append('containerId', containerId);
       form.append('file', file);
       const response = await apiClient.post('/ingest_file', form, {
-        headers: { 'x-session-id': sessionId, 'Content-Type': 'multipart/form-data' }
+        headers: { 'x-session-id': sessionId, 'Content-Type': 'multipart/form-data' },
+        timeout: 300000 // 5 minutes timeout for file uploads
       });
       return response;
     } catch (error) {
       return { success: false, message: error.message || 'Failed to ingest file' };
+    }
+  },
+
+  /**
+   * Delete a specific document from an AI instance
+   * @param {string} sessionId - User session ID
+   * @param {string} containerId - AI container ID
+   * @param {string} documentId - Document ID to delete
+   * @returns {Promise<Object>} - Response with success status or error
+   */
+  async deleteDocument(sessionId, containerId, documentId) {
+    try {
+      const response = await apiClient.delete('/delete_document', {
+        data: {
+          containerId,
+          documentId,
+        },
+        headers: {
+          'x-session-id': sessionId,
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to delete document',
+      };
+    }
+  },
+
+  /**
+   * Clear all documents from an AI instance
+   * @param {string} sessionId - User session ID
+   * @param {string} containerId - AI container ID
+   * @returns {Promise<Object>} - Response with success status or error
+   */
+  async clearAllDocuments(sessionId, containerId) {
+    try {
+      const response = await apiClient.delete('/clear_all_documents', {
+        data: {
+          containerId,
+        },
+        headers: {
+          'x-session-id': sessionId,
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to clear documents',
+      };
     }
   },
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useMusic } from '../contexts/MusicContext';
 import styled from 'styled-components';
 
@@ -13,9 +13,15 @@ const MusicPlayerContainer = styled.div`
   padding: 15px;
   color: white;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  z-index: 1001;
+  z-index: 9999;
   transition: all 0.3s ease;
   border: 1px solid rgba(255, 0, 0, 0.3);
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  pointer-events: auto;
+  isolation: isolate;
 
   &:hover {
     transform: translateY(-2px);
@@ -48,9 +54,19 @@ const MinimizeButton = styled.button`
   padding: 5px;
   border-radius: 3px;
   transition: background 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  pointer-events: auto;
+  z-index: 10000;
 
   &:hover {
     background: rgba(255, 255, 255, 0.1);
+  }
+
+  &:active {
+    background: rgba(255, 0, 0, 0.3);
   }
 `;
 
@@ -267,6 +283,8 @@ const MiniMusicPlayer = () => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [localSearchQuery, setLocalSearchQuery] = useState('');
   
+  console.log('🎵 Music Player State - isMinimized:', isMinimized);
+  
   const {
     currentTrack,
     isPlaying,
@@ -284,11 +302,40 @@ const MiniMusicPlayer = () => {
     clearSearch
   } = useMusic();
 
+  // Prevent music player from interfering with other components
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      // Only prevent propagation for music player clicks, but allow internal buttons to work
+      if (e.target.closest('.music-player-container') && !e.target.closest('button')) {
+        e.stopPropagation();
+      }
+    };
+
+    document.addEventListener('click', handleGlobalClick, true);
+    return () => {
+      document.removeEventListener('click', handleGlobalClick, true);
+    };
+  }, []);
+
   const handleSearch = async (e) => {
     e.preventDefault();
     if (localSearchQuery.trim()) {
       await searchMusic(localSearchQuery);
     }
+  };
+
+  const handleMinimize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('🎵 Minimizing music player...');
+    setIsMinimized(true);
+  };
+
+  const handleExpand = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('🎵 Expanding music player...');
+    setIsMinimized(false);
   };
 
   const handlePlayResult = (video) => {
@@ -306,20 +353,29 @@ const MiniMusicPlayer = () => {
 
   if (isMinimized) {
     return (
-      <MusicPlayerContainer style={{ width: '60px', height: '60px', padding: '10px' }}>
+      <MusicPlayerContainer 
+        className="music-player-container"
+        style={{ width: '60px', height: '60px', padding: '10px', cursor: 'pointer' }}
+        onClick={handleExpand}
+        title="Click to expand music player"
+      >
         <PlayerHeader>
           <PlayerTitle>🎵</PlayerTitle>
-          <MinimizeButton onClick={() => setIsMinimized(false)}>+</MinimizeButton>
+          <MinimizeButton onClick={handleExpand} title="Expand Music Player">
+            ⬆️
+          </MinimizeButton>
         </PlayerHeader>
       </MusicPlayerContainer>
     );
   }
 
   return (
-    <MusicPlayerContainer>
+    <MusicPlayerContainer className="music-player-container">
       <PlayerHeader>
         <PlayerTitle>🎵 Music Player</PlayerTitle>
-        <MinimizeButton onClick={() => setIsMinimized(true)}>−</MinimizeButton>
+        <MinimizeButton onClick={handleMinimize} title="Minimize Music Player">
+          ⬇️
+        </MinimizeButton>
       </PlayerHeader>
 
       {currentTrack ? (

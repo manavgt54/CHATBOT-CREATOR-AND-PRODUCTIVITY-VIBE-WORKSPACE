@@ -1,0 +1,23 @@
+Test PDF Document
+==================
+
+This is a test PDF document for testing the AI document processing system.
+
+Personal Information:
+- Name: John Doe
+- Address: 123 Test Street, Test City, TC 12345
+- Phone: (555) 123-4567
+- Email: john.doe@test.com
+
+Financial Information:
+- Income: $75,000
+- Tax ID: 123-45-6789
+- Bank Account: 1234567890
+
+Document Details:
+- Document Type: Test Document
+- Date: 2025-09-20
+- Status: Active
+- Reference Number: TEST-1758409923967
+
+This document contains various types of information that the AI should be able to extract and analyze when asked about personal details, financial information, or document specifics.

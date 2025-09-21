@@ -1,0 +1,22 @@
+
+    AI Chatbot Platform Documentation
+    
+    This platform allows users to create specialized AI chatbots that can:
+    - Analyze uploaded documents (PDF, images, text files)
+    - Use document content as context for responses
+    - Provide specialized knowledge based on uploaded materials
+    - Maintain conversation memory and personality
+    
+    Key Features:
+    - File Upload: PDF, images, text files
+    - OCR Processing: Extract text from images
+    - RAG System: Retrieve relevant document chunks
+    - Context Integration: Use documents in AI responses
+    - Personality Enforcement: Stay within defined expertise
+    
+    The system uses a RAG (Retrieval Augmented Generation) approach where:
+    1. Documents are chunked into smaller pieces
+    2. Each chunk is embedded using Google's embedding model
+    3. Relevant chunks are retrieved based on user queries
+    4. Retrieved context is included in AI responses
+    

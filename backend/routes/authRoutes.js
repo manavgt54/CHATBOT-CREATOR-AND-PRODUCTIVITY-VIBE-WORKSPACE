@@ -4,11 +4,138 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { sessionManager } = require('../services/sessionManager');
 const { userService } = require('../services/userService');
+const { generateOTP, sendOTPEmail } = require('../services/sendGridService');
+const { storeOTP, verifyOTP } = require('../services/otpService');
 
 const router = express.Router();
 
 // JWT secret - in production, use environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+
+/**
+ * POST /api/auth/send-otp
+ * Send OTP to email for registration
+ */
+router.post('/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Validate input
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await userService.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    
+    // Store OTP
+    storeOTP(email, otp);
+
+    // Send OTP email
+    const emailResult = await sendOTPEmail(email, otp);
+    
+    if (emailResult.success) {
+      res.json({
+        success: true,
+        message: 'OTP sent successfully to your email',
+        email: email
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send OTP email',
+        error: emailResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while sending OTP'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/verify-otp
+ * Verify OTP and complete registration
+ */
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { email, otp, password, name } = req.body;
+
+    // Validate input
+    if (!email || !otp || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email, OTP, and password are required'
+      });
+    }
+
+    // Verify OTP
+    const otpResult = verifyOTP(email, otp);
+    
+    if (!otpResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: otpResult.message
+      });
+    }
+
+    // Check if user already exists (double check)
+    const existingUser = await userService.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Hash password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const user = await userService.createUser({
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      name: name || 'User',
+      createdAt: new Date().toISOString()
+    });
+
+    console.log(`✅ New user registered with OTP verification: ${email}`);
+
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully with OTP verification',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name
+      }
+    });
+
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during OTP verification'
+    });
+  }
+});
 
 /**
  * POST /api/auth/login

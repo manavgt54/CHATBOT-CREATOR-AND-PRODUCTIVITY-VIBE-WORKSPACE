@@ -531,6 +531,7 @@ function ChatInterface({ ai, onClose, sessionId }) {
             type: file.type,
             size: file.size,
             chunks: resp.ingestedChunks || 0,
+            docId: resp.docId, // Store document ID for deletion
             status: 'uploaded'
           });
         } else {
@@ -559,7 +560,30 @@ function ChatInterface({ ai, onClose, sessionId }) {
     setIsUploading(false);
   };
 
-  const removeFile = (fileId) => {
+  const removeFile = async (fileId) => {
+    const fileToRemove = uploadedFiles.find(f => f.id === fileId);
+    if (!fileToRemove) return;
+
+    // If the file has a docId, delete it from the backend
+    if (fileToRemove.docId && ai?.containerId) {
+      try {
+        console.log('🗑️ Deleting document from backend:', fileToRemove.docId);
+        const result = await apiService.deleteDocument(sessionId, ai.containerId, fileToRemove.docId);
+        
+        if (result.success) {
+          console.log('✅ Document deleted from backend:', result.message);
+          if (result.ragCleanup) {
+            console.log('🧹 RAG data cleaned up:', result.ragCleanup.removedCount, 'vectors removed');
+          }
+        } else {
+          console.error('❌ Failed to delete document from backend:', result.message);
+        }
+      } catch (error) {
+        console.error('❌ Error deleting document from backend:', error);
+      }
+    }
+
+    // Remove from UI regardless of backend deletion result
     setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 

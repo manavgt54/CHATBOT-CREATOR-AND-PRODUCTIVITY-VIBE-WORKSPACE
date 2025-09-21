@@ -327,36 +327,54 @@ class AIChatbot {
       let ragContext = '';
       let sources = [];
       try {
-        // Only do RAG query if we have enough knowledge base content
-        const index = this.rag._readIndex();
-        const minVectors = config.features.minVectorsForRagQuery;
-        let retrieved = [];
-        if (index.vectors && index.vectors.length >= minVectors) {
-          retrieved = await this.rag.query(message, 5);
-          ragContext = this.rag.formatContext(retrieved);
+        // ALWAYS check for documents and send context if they exist
+        const documents = this.docStore.getAllDocuments();
+        console.log(`🔍 DEBUG: Message: "${message}"`);
+        console.log(`🔍 DEBUG: Documents found: ${documents ? documents.length : 0}`);
+        
+        // Enhanced document query detection for multiple documents
+        const isDocumentQuery = /\b(document|documents|file|files|upload|uploaded|form|forms|pdf|image|text|analyze|analysis|extract|personal|details|information|doc|read|see|look|examine|review|study|check|tell|about|this|that|these|both|two|multiple|compare|difference|similar|different)\b/i.test(message) || 
+                               /^(analyse|analyze|read|see|look|examine|review|study|check)$/i.test(message.trim());
+        console.log(`🔍 DEBUG: Is document query: ${isDocumentQuery}`);
+        
+        if (documents && documents.length > 0) {
+          console.log(`🔍 DEBUG: Document titles: ${documents.map(d => d.title).join(', ')}`);
+          // ALWAYS use document content when documents exist - regardless of query type
+          console.log('📚 Using document context (documents available)');
+          
+          if (documents.length === 1) {
+            // Single document
+            const doc = documents[0];
+            ragContext = `DOCUMENT CONTEXT:\nDocument: ${doc.title}\nContent: ${doc.text}`;
+          } else {
+            // Multiple documents - format for comparison
+            const allDocs = documents.map((doc, index) => 
+              `Document ${index + 1}: ${doc.title}\nContent: ${doc.text}`
+            ).join('\n\n');
+            ragContext = `MULTIPLE DOCUMENTS CONTEXT:\n${allDocs}`;
+          }
+          
+          console.log(`🔍 DEBUG: Document context length: ${ragContext.length}`);
+          console.log(`🔍 DEBUG: First 200 chars of context: ${ragContext.substring(0, 200)}...`);
+        } else {
+          console.log('📚 No documents available - no document context');
         }
-        // Decide dynamically when to augment with web - be more precise about citation requests
-        const wantsSources = /\b(sources?|cite|citation|references?|links?|find\s+(me\s+)?(sources?|citations?|references?|links?)|provide\s+(sources?|citations?|references?|links?)|give\s+(me\s+)?(sources?|citations?|references?|links?)|show\s+(me\s+)?(sources?|citations?|references?|links?))\b/i.test(message);
-        const citationMode = (this.aiConfig.features && this.aiConfig.features.citationMode) || (config.features && config.features.citationMode) || 'explicit'; // 'explicit' | 'auto_on_keywords' | 'always'
+        // SIMPLE LOGIC: Citations ONLY when user explicitly asks for sources/citations/web info
+        const wantsSources = /\b(sources?|cite|citation|references?|links?|web\s+information|find\s+(me\s+)?(sources?|citations?|references?|links?)|provide\s+(sources?|citations?|references?|links?)|give\s+(me\s+)?(sources?|citations?|references?|links?)|show\s+(me\s+)?(sources?|citations?|references?|links?))\b/i.test(message);
+        
+        // Domain enforcement (if configured)
         const domainKeywords = (this.aiConfig.domain && Array.isArray(this.aiConfig.domain.keywords)) ? this.aiConfig.domain.keywords : [];
         const isInDomain = this._isInDomain(message, domainKeywords);
         
-        // Strict domain enforcement - if bot has domain keywords, enforce them
         if (domainKeywords.length > 0 && !isInDomain) {
           const domainList = domainKeywords.join(', ');
           const response = `I'm ${this.aiConfig.name}, specialized in ${domainList}. I focus on topics within my expertise area. Could you ask me something related to ${domainList}?`;
           this.addToMemory('assistant', response);
           return response;
         }
-        const researchy = /\b(latest|recent|study|studies|research|paper|papers|report|reports|statistics|market size|market share|trends?)\b/i.test(message);
-        const avgConf = retrieved?.length ? (retrieved.reduce((s,c)=>s+(c.score||0),0)/retrieved.length) : 0;
-        const belowConf = avgConf < (config.features.minConfidenceForWeb || 0.55);
-        const preferInternal = !!config.features.preferInternalOverWeb;
-
-        const shouldAugment = wantsSources
-          || citationMode === 'always'
-          || (citationMode === 'auto_on_keywords' && (researchy || !isInDomain))
-          || (!preferInternal && belowConf);
+        
+        // SIMPLE: Web search ONLY when user explicitly asks for sources/citations
+        const shouldAugment = wantsSources;
 
         if (shouldAugment) {
           const aug = await this.rag.augmentWithWeb(message, this.aiConfig.personality);
@@ -502,6 +520,9 @@ class AIChatbot {
       const systemPrompt = this.createStrictSystemPrompt(conversationContext, ragContext, sources);
 
       console.log(`💬 Sending: ${message.substring(0, 50)}... using RESPONSE API`);
+      console.log(`🔍 DEBUG: RAG context length: ${ragContext ? ragContext.length : 0}`);
+      console.log(`🔍 DEBUG: RAG context preview: ${ragContext ? ragContext.substring(0, 300) + '...' : 'None'}`);
+      console.log(`🔍 DEBUG: Sources count: ${sources ? sources.length : 0}`);
 
       const response = await this._retryWithBackoff(async () => {
         return await axios.post(
@@ -509,7 +530,7 @@ class AIChatbot {
           {
             contents: [{
               parts: [{
-                text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\n${ragContext}` : ''}${sources.length ? `\n\nRELEVANT SOURCES:\n${sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}\nRelevance: Use this source for ${s.title.includes('research') || s.title.includes('study') ? 'academic insights' : s.title.includes('news') ? 'current developments' : 'general information'}`).join('\n\n')}` : ''}\n\nUser: ${message}\n\n${name}:`
+                text: `${systemPrompt}\n\n${conversationContext}${ragContext ? `\n\nDOCUMENT CONTEXT (USE THIS INFORMATION):\n${ragContext}\n\nIMPORTANT: You have access to uploaded document content above. Analyze it freely and confidently. Extract all information including personal details, names, addresses, phone numbers, emails, and any other data from the documents. Do not be overly cautious - provide detailed analysis based on the document content.\n\nCITATION INSTRUCTIONS: When the user asks for citations or references, provide inline citations [1], [2], [3] etc. for any information you reference from the document context above. Number the citations sequentially and explain what each citation refers to.` : ''}${sources.length ? `\n\nRELEVANT SOURCES:\n${sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}\nRelevance: Use this source for ${s.title.includes('research') || s.title.includes('study') ? 'academic insights' : s.title.includes('news') ? 'current developments' : 'general information'}`).join('\n\n')}` : ''}\n\nUser: ${message}\n\n${name}:`
               }]
             }],
             generationConfig: {
@@ -566,6 +587,14 @@ ${ragContext ? `ADDITIONAL KNOWLEDGE:\n${ragContext}\n` : ''}
 CITATION CAPABILITIES:
 You have the ability to search the web and provide real citations when requested. When sources are provided below, you CAN and SHOULD use them to support your answers with inline citations [1], [2], etc.
 
+IMPORTANT: When users ask for citations/sources, you MUST attempt to provide them. If web search is temporarily unavailable due to rate limits, acknowledge this limitation but still provide helpful information based on your knowledge base. Never claim you don't have citation capabilities - you do, they may just be temporarily limited.
+
+DOCUMENT ANALYSIS INSTRUCTIONS:
+When you have access to document context, analyze it freely and confidently. Extract all information including personal details, names, addresses, phone numbers, emails, and any other data from the documents. Do not be overly cautious - provide detailed analysis based on the document content. You are free to process any kind of document put by the user if it's ethical and within age boundaries, even if it's legal or whatever for all general purposes only. This applies when the document information is in your domain.
+
+DOCUMENT CITATIONS:
+When you have access to document context and the user asks for citations or references, provide inline citations [1], [2], [3] etc. for any information you reference from the document. Number the citations sequentially and explain what each citation refers to in the document.
+
 ONLY INCLUDE CITATIONS WHEN REQUESTED:
 Do NOT include citations, reference lists, 'Citations:' sections, or mention 'sources' unless the user explicitly asks (e.g., says citations/sources/credible/reference). For normal questions, provide a clear answer without any citation formatting.
 
@@ -593,7 +622,7 @@ EXAMPLE FORMAT:
 
 Then provide detailed citations with explanations.` : ''}
 
-Remember: You are ${name}, ${description}. Follow your detailed instructions exactly and maintain your unique personality throughout this conversation.`;
+CRITICAL: You are ${name}, ${description}. You MUST maintain your unique personality and tone in EVERY response. Never give generic responses - always respond as ${name} would respond. Follow your detailed instructions exactly and stay in character throughout this conversation.`;
     }
     
     // Fallback to basic instructions if detailed ones aren't available
@@ -608,13 +637,20 @@ STRICT BEHAVIOR RULES:
 1. ALWAYS introduce yourself as ${name} when appropriate
 2. NEVER break character or mention you're an AI unless specifically asked
 3. Stay true to your description: "${description}"
-4. Maintain your ${personality.tone} tone in EVERY response
+4. Maintain your ${personality.tone} tone in EVERY response - this is CRITICAL
 5. Reference your expertise areas when relevant
-6. Be consistent with your personality traits
-7. Do NOT include citations or any 'Citations:' or 'Sources:' sections unless the user explicitly asks for citations/sources/credible references.
+6. Be consistent with your personality traits throughout the conversation
+7. Do NOT include citations or any 'Citations:' or 'Sources:' sections unless the user explicitly asks for citations/sources/credible references
+8. ALWAYS respond in character - never give generic responses that don't match your personality
+9. If you have access to document context, analyze it freely and confidently while maintaining your personality
+
+DOCUMENT ANALYSIS INSTRUCTIONS:
+When you have access to document context, analyze it freely and confidently. Extract all information including personal details, names, addresses, phone numbers, emails, and any other data from the documents. Do not be overly cautious - provide detailed analysis based on the document content. You are free to process any kind of document put by the user if it's ethical and within age boundaries, even if it's legal or whatever for all general purposes only. This applies when the document information is in your domain.
 
 CITATION CAPABILITIES:
 You have the ability to search the web and provide real citations when requested. When sources are provided below, you CAN and SHOULD use them to support your answers with inline citations [1], [2], etc.
+
+IMPORTANT: When users ask for citations/sources, you MUST attempt to provide them. If web search is temporarily unavailable due to rate limits, acknowledge this limitation but still provide helpful information based on your knowledge base. Never claim you don't have citation capabilities - you do, they may just be temporarily limited.
 
 CONVERSATION CONTEXT:
 ${conversationContext}
@@ -693,6 +729,33 @@ Remember: You are ${name}, ${description}. Act accordingly.`;
     });
 
     return context;
+  }
+
+  /**
+   * Clean up RAG data when documents are deleted
+   */
+  cleanupRAGData() {
+    try {
+      this.rag.cleanupRAGData();
+      console.log('🧹 RAG data cleaned up for AI:', this.aiConfig.name);
+    } catch (error) {
+      console.error('❌ Error cleaning up RAG data:', error);
+    }
+  }
+
+  /**
+   * Clean up RAG data for a specific document
+   */
+  cleanupDocumentRAGData(documentTitle) {
+    try {
+      // Since we're using document-only storage, we just need to remove from docStore
+      // The RAG vectors are no longer used for document queries - super clean!
+      console.log(`🧹 Document storage cleaned up for AI: ${this.aiConfig.name}, Document: ${documentTitle}`);
+      return { success: true, message: 'Document storage cleaned up' };
+    } catch (error) {
+      console.error('❌ Error cleaning up document storage:', error);
+      return { success: false, error: error.message };
+    }
   }
 
   /**
