@@ -4,7 +4,7 @@ class PingService {
   constructor() {
     this.isRunning = false;
     this.intervalId = null;
-    this.pingInterval = 5 * 60 * 1000; // 5 minutes
+    this.pingInterval = 30 * 1000; // 30 seconds (very aggressive)
     this.serverUrl = process.env.SERVER_URL || 'https://chatbot-creator-and-productivity-vibe.onrender.com';
   }
 
@@ -42,12 +42,24 @@ class PingService {
 
   async ping() {
     try {
-      const response = await axios.get(`${this.serverUrl}/api/ping`, {
-        timeout: 10000 // 10 second timeout
-      });
+      // Ping multiple endpoints to ensure server stays alive
+      const endpoints = ['/api/ping', '/api/health', '/'];
+      const results = [];
       
-      console.log(`✅ Ping successful: ${response.data.status} at ${response.data.timestamp}`);
-      return true;
+      for (const endpoint of endpoints) {
+        try {
+          const response = await axios.get(`${this.serverUrl}${endpoint}`, {
+            timeout: 5000 // 5 second timeout
+          });
+          results.push({ endpoint, status: 'success', data: response.data });
+        } catch (error) {
+          results.push({ endpoint, status: 'failed', error: error.message });
+        }
+      }
+      
+      const successCount = results.filter(r => r.status === 'success').length;
+      console.log(`✅ Ping successful: ${successCount}/${endpoints.length} endpoints responded`);
+      return successCount > 0;
     } catch (error) {
       console.error('❌ Ping failed:', error.message);
       return false;

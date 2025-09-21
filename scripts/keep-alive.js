@@ -3,7 +3,7 @@ const axios = require('axios');
 class KeepAliveService {
   constructor() {
     this.serverUrl = process.env.SERVER_URL || 'https://chatbot-creator-and-productivity-vibe.onrender.com';
-    this.pingInterval = 5 * 60 * 1000; // 5 minutes
+    this.pingInterval = 30 * 1000; // 30 seconds
     this.isRunning = false;
     this.intervalId = null;
   }
