@@ -16,6 +16,7 @@ const publicAIRoutes = require('./routes/publicAIRoutes');
 // Import services
 const { sessionManager } = require('./services/sessionManager');
 const { containerManager } = require('./services/containerManager');
+const { pingService } = require('./services/pingService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -47,15 +48,40 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Ping endpoint to keep server alive
+app.get('/api/ping', (req, res) => {
+  res.json({ 
+    status: 'pong', 
+    timestamp: new Date().toISOString(),
+    message: 'Server is alive and responding'
+  });
+});
+
+// Root endpoint for basic health check
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'AI Creation Platform API is running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      ping: '/api/ping',
+      auth: '/api/auth',
+      ai: '/api',
+      public: '/public'
+    }
+  });
+});
+
+// API Routes (must come before static file serving)
+app.use('/api/auth', authRoutes);
+app.use('/api', aiRoutes);
+app.use('/public', publicAIRoutes);
+
 // Serve static files from React build (for production)
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../frontend/build')));
 }
-
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api', aiRoutes);
-app.use('/public', publicAIRoutes);
 
 // WebSocket connection handling for real-time AI interactions
 wss.on('connection', (ws, req) => {
@@ -159,11 +185,17 @@ server.listen(PORT, () => {
     .catch((error) => {
       console.error('❌ Failed to initialize container manager:', error);
     });
+
+  // Start ping service to keep server alive (only in production)
+  if (process.env.NODE_ENV === 'production') {
+    pingService.start();
+  }
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
+  pingService.stop();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
@@ -172,6 +204,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down gracefully');
+  pingService.stop();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);

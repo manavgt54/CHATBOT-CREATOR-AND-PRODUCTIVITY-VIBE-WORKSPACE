@@ -230,9 +230,18 @@ const SearchResult = styled.div`
   cursor: pointer;
   transition: background 0.2s ease;
   margin-bottom: 4px;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  pointer-events: auto;
 
   &:hover {
     background: rgba(255, 0, 0, 0.2);
+  }
+
+  &:active {
+    background: rgba(255, 0, 0, 0.3);
   }
 `;
 
@@ -305,8 +314,10 @@ const MiniMusicPlayer = () => {
   // Prevent music player from interfering with other components
   useEffect(() => {
     const handleGlobalClick = (e) => {
-      // Only prevent propagation for music player clicks, but allow internal buttons to work
-      if (e.target.closest('.music-player-container') && !e.target.closest('button')) {
+      // Only prevent propagation for music player clicks, but allow internal buttons and search results to work
+      if (e.target.closest('.music-player-container') && 
+          !e.target.closest('button') && 
+          !e.target.closest('[data-search-result]')) {
         e.stopPropagation();
       }
     };
@@ -339,6 +350,7 @@ const MiniMusicPlayer = () => {
   };
 
   const handlePlayResult = (video) => {
+    console.log('🎵 Playing result:', video.snippet.title);
     const track = {
       id: video.id.videoId,
       title: video.snippet.title,
@@ -456,7 +468,14 @@ const MiniMusicPlayer = () => {
             {searchResults.slice(0, 3).map((video) => (
               <SearchResult
                 key={video.id.videoId}
-                onClick={() => handlePlayResult(video)}
+                data-search-result="true"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('🎵 Search result clicked:', video.snippet.title);
+                  handlePlayResult(video);
+                }}
+                title={`Play: ${video.snippet.title}`}
               >
                 <ResultThumbnail src={video.snippet.thumbnails.default.url} alt={video.snippet.title} />
                 <ResultInfo>
