@@ -8,7 +8,7 @@
 
 > **Hackathon**: Google Gen AI International Hackathon  
 > **Date**: September 21, 2025  
-> **Team**: manavgt54, VAIBHAV WAGHALKAR, THANUSHREE-23, VANI412
+> **Team**: manavgt54, VAIBHAV WAGHALKAR, Shahane-Vaishnavi,THANUSHREE-23, VANI412
 
 ## 🎯 Project Overview
 
