@@ -114,7 +114,7 @@ State     Middleware    AI Processing  Vector DB  Real-time
 ## ⚡ Technical Highlights
 
 - **Real-time AI responses** (<2 sec)
-- **Multi-bot support** (50+ live, 1000+ in Phase 2)
+- **Multi-bot support** unlimited active instances can spin without any clash absolute isolation is insured
 - **Low storage per bot** (symlink optimization)
 - **Inline citations** & smart augmentation
 - **Domain-aware responses**
