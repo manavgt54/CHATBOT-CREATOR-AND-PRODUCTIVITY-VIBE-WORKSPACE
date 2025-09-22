@@ -57,8 +57,8 @@ app.get('/api/ping', (req, res) => {
   });
 });
 
-// Root endpoint for basic health check
-app.get('/', (req, res) => {
+// Info endpoint for basic API details
+app.get('/api/info', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'AI Creation Platform API is running',
